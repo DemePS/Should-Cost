@@ -16,11 +16,10 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from agent_framework import Agent, ChatOptions, Message
-from agent_framework_foundry import FoundryChatClient
+from agent_framework import Agent, BaseChatClient, ChatOptions, Message
 from pydantic import BaseModel
 
-from should_cost.config import Settings
+from should_cost.config import ModelProvider, Settings
 from should_cost.models.workflow import Insights, PartFacts, PreBuildReasoning, ProposedParameters
 from should_cost.tools.foundry_credentials import build_foundry_credential
 from should_cost.tools.process_formulas import (
@@ -69,12 +68,34 @@ def _messages(system_text: str, user_text: str) -> list[Message]:
     return [Message("system", [system_text]), Message("user", [user_text])]
 
 
-def build_chat_client(settings: Settings) -> FoundryChatClient:
+def build_chat_client(settings: Settings) -> BaseChatClient:
     """One client per call site is fine per the SDK's own concurrency note ("one client
     instance can be shared by concurrent asynchronous calls... each call must use its own
     Agent/AgentSession/messages/options") — callers (workflow steps) are expected to reuse
     a single client across a job's calls rather than constructing one per call.
+
+    Picks the client class for ``settings.model_provider``; every call site above this
+    (extract_part_facts, propose_parameters, ...) and the research agent only depend on
+    the common ``BaseChatClient``/``Agent`` interface, never on a provider-specific type.
     """
+    if settings.model_provider is ModelProvider.ANTHROPIC:
+        from agent_framework.anthropic import AnthropicClient
+
+        assert settings.anthropic_api_key
+        return AnthropicClient(api_key=settings.anthropic_api_key, model=settings.model_deployment)
+
+    if settings.model_provider is ModelProvider.DEEPSEEK:
+        from agent_framework.openai import OpenAIChatClient
+
+        assert settings.deepseek_api_key
+        return OpenAIChatClient(
+            model=settings.model_deployment,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
+
+    from agent_framework_foundry import FoundryChatClient
+
     credential = build_foundry_credential(settings)
     return FoundryChatClient(
         project_endpoint=settings.azure_ai_foundry_endpoint,
@@ -83,14 +104,14 @@ def build_chat_client(settings: Settings) -> FoundryChatClient:
     )
 
 
-async def _structured_call(client: FoundryChatClient, *, system_text: str, user_text: str, response_format: type[BaseModel]):
+async def _structured_call(client: BaseChatClient, *, system_text: str, user_text: str, response_format: type[BaseModel]):
     messages = _messages(system_text, user_text)
     response = await client.get_response(messages, options=ChatOptions(response_format=response_format))
     return response.value
 
 
 async def extract_part_facts(
-    client: FoundryChatClient, *, document_text: str, ppe_context: str
+    client: BaseChatClient, *, document_text: str, ppe_context: str
 ) -> PartFacts:
     """Step 1."""
     return await _structured_call(
@@ -106,7 +127,7 @@ async def extract_part_facts(
 
 
 async def pre_build_reasoning(
-    client: FoundryChatClient,
+    client: BaseChatClient,
     *,
     component_label: str,
     part_facts: PartFacts,
@@ -129,7 +150,7 @@ async def pre_build_reasoning(
 
 
 async def propose_parameters(
-    client: FoundryChatClient,
+    client: BaseChatClient,
     *,
     component_label: str,
     part_facts: PartFacts,
@@ -175,7 +196,7 @@ async def propose_parameters(
 
 
 async def write_insights(
-    client: FoundryChatClient,
+    client: BaseChatClient,
     *,
     component_label: str,
     language: str,

@@ -1,14 +1,20 @@
-"""Credential selection (Graph + Foundry) and search-provider validation."""
+"""Credential selection (Graph + Foundry), model-provider selection, and
+search-provider validation.
+"""
 
 from __future__ import annotations
 
 import os
 
 import pytest
+from agent_framework.anthropic import AnthropicClient
+from agent_framework.openai import OpenAIChatClient
+from agent_framework_foundry import FoundryChatClient
 from azure.identity.aio import ClientSecretCredential, DefaultAzureCredential, ManagedIdentityCredential
 
 from should_cost.config import FoundryCredentialKind, GraphCredentialKind, Settings, get_settings
 from should_cost.graph.credentials import build_graph_credential
+from should_cost.tools import model_client
 from should_cost.tools.foundry_credentials import _StaticKeyCredential, build_foundry_credential
 
 BASE_ENV = {
@@ -76,6 +82,49 @@ def test_foundry_credential_api_key_builds_static_credential() -> None:
     settings = _settings(AZURE_AI_FOUNDRY_CREDENTIAL="api_key", AZURE_AI_FOUNDRY_API_KEY="sekret")
     credential = build_foundry_credential(settings)
     assert isinstance(credential, _StaticKeyCredential)
+
+
+def test_model_provider_defaults_to_foundry() -> None:
+    settings = _settings()
+    client = model_client.build_chat_client(settings)
+    assert isinstance(client, FoundryChatClient)
+
+
+def test_model_provider_foundry_requires_endpoint() -> None:
+    with pytest.raises(Exception, match="MODEL_PROVIDER=foundry requires"):
+        _settings(AZURE_AI_FOUNDRY_ENDPOINT="")
+
+
+def test_model_provider_anthropic_requires_key() -> None:
+    with pytest.raises(Exception, match="MODEL_PROVIDER=anthropic requires"):
+        _settings(MODEL_PROVIDER="anthropic")
+
+
+def test_model_provider_anthropic_builds_client() -> None:
+    settings = _settings(MODEL_PROVIDER="anthropic", ANTHROPIC_API_KEY="sk-ant-abc")
+    client = model_client.build_chat_client(settings)
+    assert isinstance(client, AnthropicClient)
+
+
+def test_model_provider_deepseek_requires_key() -> None:
+    with pytest.raises(Exception, match="MODEL_PROVIDER=deepseek requires"):
+        _settings(MODEL_PROVIDER="deepseek")
+
+
+def test_model_provider_deepseek_builds_openai_compatible_client() -> None:
+    settings = _settings(
+        MODEL_PROVIDER="deepseek",
+        DEEPSEEK_API_KEY="sk-ds-abc",
+        SEARCH_PROVIDER="tavily",
+        TAVILY_API_KEY="tvly-abc",
+    )
+    client = model_client.build_chat_client(settings)
+    assert isinstance(client, OpenAIChatClient)
+
+
+def test_model_provider_deepseek_rejects_hosted_search() -> None:
+    with pytest.raises(Exception, match="not available with MODEL_PROVIDER=deepseek"):
+        _settings(MODEL_PROVIDER="deepseek", DEEPSEEK_API_KEY="sk-ds-abc")
 
 
 def test_search_provider_defaults_to_hosted_no_key_needed() -> None:

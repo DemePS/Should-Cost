@@ -2,9 +2,12 @@
 
 Tools:
 - ``web_search``: the Microsoft Agent Framework hosted web-search tool
-  (``client.get_web_search_tool()``, Bing grounding via Azure AI Foundry) when
-  ``SEARCH_PROVIDER=hosted``, or a Tavily-backed function tool when
-  ``SEARCH_PROVIDER=tavily``.
+  (``client.get_web_search_tool()`` — Bing grounding on Foundry, Anthropic's own native
+  web search tool on Anthropic) when ``SEARCH_PROVIDER=hosted``, or a Tavily-backed
+  function tool when ``SEARCH_PROVIDER=tavily``. ``config.Settings`` rejects
+  ``SEARCH_PROVIDER=hosted`` with ``MODEL_PROVIDER=deepseek`` outright — DeepSeek's
+  OpenAI-compatible API has no hosted search, so there's nothing for
+  ``get_web_search_tool()`` to call.
 - ``fetch_page``: a plain function tool — fetches a URL and returns text + a best-effort
   publication date, so the agent can confirm a result before citing it.
 - ``submit_parameter``: a plain function tool that appends to this run's result list —
@@ -12,9 +15,10 @@ Tools:
   since it may need to submit many parameters across one run.
 
 Startup self-test: the Microsoft docs are inconsistent about hosted web-search support
-across Foundry model providers, so ``run_search_self_test`` makes one real search call
-with whatever ``SEARCH_PROVIDER`` is configured and raises at startup if it fails —
-should_cost/main.py calls this during the app lifespan, not lazily on first job.
+across chat-client providers, so ``run_search_self_test`` makes one real search call
+with whatever ``SEARCH_PROVIDER``/``MODEL_PROVIDER`` is configured and raises at startup
+if it fails — should_cost/main.py calls this during the app lifespan, not lazily on first
+job.
 """
 
 from __future__ import annotations
@@ -23,8 +27,7 @@ import re
 from dataclasses import dataclass, field
 
 import httpx
-from agent_framework import Agent, ChatOptions
-from agent_framework_foundry import FoundryChatClient
+from agent_framework import Agent, BaseChatClient, ChatOptions
 
 from should_cost.config import SearchProvider, Settings
 from should_cost.models.common import Confidence, Source
@@ -160,14 +163,18 @@ def build_tavily_search_tool(api_key: str):
     return web_search
 
 
-def _build_web_search_tool(settings: Settings, chat_client: FoundryChatClient):
+def _build_web_search_tool(settings: Settings, chat_client: BaseChatClient):
     if settings.search_provider == SearchProvider.HOSTED:
-        return chat_client.get_web_search_tool()
+        # get_web_search_tool() is defined by every concrete chat-client connector
+        # (Foundry, Anthropic, OpenAI) but not declared on the shared BaseChatClient —
+        # config.Settings already rejects the one provider (deepseek) that lacks a real
+        # hosted-search backend for it.
+        return chat_client.get_web_search_tool()  # type: ignore[attr-defined]
     assert settings.tavily_api_key
     return build_tavily_search_tool(settings.tavily_api_key)
 
 
-def build_research_agent(settings: Settings, chat_client: FoundryChatClient) -> tuple[Agent, _ResearchSession]:
+def build_research_agent(settings: Settings, chat_client: BaseChatClient) -> tuple[Agent, _ResearchSession]:
     session = _ResearchSession()
     instructions = _shared_hard_rules() + "\n\n" + _load_prompt("research_agent.md")
     agent = Agent(
@@ -184,7 +191,7 @@ def build_research_agent(settings: Settings, chat_client: FoundryChatClient) -> 
 
 
 async def run_research(
-    settings: Settings, chat_client: FoundryChatClient, targets: list[ResearchTarget]
+    settings: Settings, chat_client: BaseChatClient, targets: list[ResearchTarget]
 ) -> list[ResearchedParameter]:
     """Run Step 3 for one worklist. Returns one ResearchedParameter per
     ``submit_parameter`` call the agent made; the caller (workflow/steps/research.py)
@@ -201,7 +208,7 @@ async def run_research(
     return session.collected
 
 
-async def run_search_self_test(settings: Settings, chat_client: FoundryChatClient) -> str:
+async def run_search_self_test(settings: Settings, chat_client: BaseChatClient) -> str:
     """Run one real search with the configured provider; raise with a clear message if it
     fails, rather than discovering at the first real job that hosted search silently
     doesn't work for this model/provider combination (the Microsoft docs are inconsistent
@@ -218,9 +225,13 @@ async def run_search_self_test(settings: Settings, chat_client: FoundryChatClien
         async with probe_agent:
             await probe_agent.run("Search for: Eurostat industrial electricity price 2025")
     except Exception as exc:  # noqa: BLE001 - deliberately broad: this is a startup gate
+        hosted_hint = (
+            "confirm a Bing grounding connection is configured on the Foundry project (see docs/design.md)"
+            if settings.model_provider.value == "foundry"
+            else "confirm Anthropic's native web search tool is enabled for this API key/model"
+        )
         raise SearchSelfTestError(
             f"SEARCH_PROVIDER={settings.search_provider.value} self-test failed: {exc}. "
-            "If hosted, confirm a Bing grounding connection is configured on the Foundry "
-            "project (see docs/design.md); if tavily, confirm TAVILY_API_KEY is valid."
+            f"If hosted, {hosted_hint}; if tavily, confirm TAVILY_API_KEY is valid."
         ) from exc
     return settings.search_provider.value

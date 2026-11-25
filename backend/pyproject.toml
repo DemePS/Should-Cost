@@ -19,9 +19,14 @@ dependencies = [
   "pandas>=2.2,<3.0",
   "pyxlsb>=1.0,<2.0",
   # Selective install (lighter than the `agent-framework` meta-package): core
-  # chat-client/agent abstractions + the Microsoft Foundry integration only.
+  # chat-client/agent abstractions + one integration per supported MODEL_PROVIDER.
+  # DeepSeek has no dedicated connector — its API is OpenAI-compatible, so it's reached
+  # through agent-framework-openai's OpenAIChatClient with a DeepSeek base_url (see
+  # should_cost/tools/model_client.py).
   "agent-framework-core>=1.16,<2.0",
   "agent-framework-foundry>=1.16,<2.0",
+  "agent-framework-anthropic",
+  "agent-framework-openai>=1.16,<2.0",
   "tenacity>=9.0,<10.0",
   "structlog>=24.4,<25.0",
   "opencensus-ext-azure>=1.1,<2.0",

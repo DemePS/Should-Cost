@@ -24,6 +24,19 @@ class FoundryCredentialKind(str, Enum):
     API_KEY = "api_key"
 
 
+class ModelProvider(str, Enum):
+    """Which provider the three structured model calls + the research agent run on.
+    Only one is active per deployment; MODEL_DEPLOYMENT names the model/deployment id to
+    use on whichever provider is selected (see should_cost/tools/model_client.py).
+    """
+
+    FOUNDRY = "foundry"
+    ANTHROPIC = "anthropic"
+    # No dedicated connector: DeepSeek's API is OpenAI-compatible, reached through
+    # agent-framework-openai's OpenAIChatClient pointed at DEEPSEEK_BASE_URL.
+    DEEPSEEK = "deepseek"
+
+
 class SearchProvider(str, Enum):
     HOSTED = "hosted"
     TAVILY = "tavily"
@@ -47,12 +60,22 @@ class Settings(BaseSettings):
     azure_client_id: str | None = None
     azure_client_secret: str | None = None
 
-    # ── Azure AI Foundry ──────────────────────────────────────────────────
-    azure_ai_foundry_endpoint: str
+    # ── Model provider ────────────────────────────────────────────────────
+    model_provider: ModelProvider = ModelProvider.FOUNDRY
     model_deployment: str
+
+    # Azure AI Foundry — only required/used when MODEL_PROVIDER=foundry.
+    azure_ai_foundry_endpoint: str | None = None
     azure_ai_foundry_api_version: str = "2024-10-21"
     azure_ai_foundry_credential: FoundryCredentialKind = FoundryCredentialKind.DEFAULT
     azure_ai_foundry_api_key: str | None = None
+
+    # Anthropic — only required/used when MODEL_PROVIDER=anthropic.
+    anthropic_api_key: str | None = None
+
+    # DeepSeek — only required/used when MODEL_PROVIDER=deepseek.
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str = "https://api.deepseek.com"
 
     # ── Research agent ────────────────────────────────────────────────────
     search_provider: SearchProvider = SearchProvider.HOSTED
@@ -90,10 +113,24 @@ class Settings(BaseSettings):
                     "GRAPH_CREDENTIAL=client_secret requires "
                     f"{', '.join(missing)} to be set"
                 )
-        if self.azure_ai_foundry_credential == FoundryCredentialKind.API_KEY:
-            if not self.azure_ai_foundry_api_key:
+        if self.model_provider == ModelProvider.FOUNDRY:
+            if not self.azure_ai_foundry_endpoint:
+                raise ValueError("MODEL_PROVIDER=foundry requires AZURE_AI_FOUNDRY_ENDPOINT")
+            if self.azure_ai_foundry_credential == FoundryCredentialKind.API_KEY and not self.azure_ai_foundry_api_key:
                 raise ValueError(
                     "AZURE_AI_FOUNDRY_CREDENTIAL=api_key requires AZURE_AI_FOUNDRY_API_KEY"
+                )
+        elif self.model_provider == ModelProvider.ANTHROPIC:
+            if not self.anthropic_api_key:
+                raise ValueError("MODEL_PROVIDER=anthropic requires ANTHROPIC_API_KEY")
+        elif self.model_provider == ModelProvider.DEEPSEEK:
+            if not self.deepseek_api_key:
+                raise ValueError("MODEL_PROVIDER=deepseek requires DEEPSEEK_API_KEY")
+            if self.search_provider == SearchProvider.HOSTED:
+                raise ValueError(
+                    "SEARCH_PROVIDER=hosted is not available with MODEL_PROVIDER=deepseek "
+                    "(DeepSeek's OpenAI-compatible API has no hosted web-search tool); "
+                    "set SEARCH_PROVIDER=tavily"
                 )
         if self.search_provider == SearchProvider.TAVILY and not self.tavily_api_key:
             raise ValueError("SEARCH_PROVIDER=tavily requires TAVILY_API_KEY")

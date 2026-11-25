@@ -3,6 +3,19 @@ revision = 3
 requires-python = "==3.11.*"
 
 [[package]]
+name = "agent-framework-anthropic"
+version = "1.0.0b261112"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "agent-framework-core" },
+    { name = "anthropic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/2b/45e65852273e7458feb6e9ff252ad2ed135a6d858f0199727b62532dce5b/agent_framework_anthropic-1.0.0b261112.tar.gz", hash = "sha256:a4c1719d0d852fef210cb22632a297edf0b2866ae5ee9fe8bf2f2aab543058f8", size = 29700, upload-time = "2026-11-12T18:25:01.606Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/91/022925268219872aedbfa0b06465f79257ff72990424ec0847070bf71ab5/agent_framework_anthropic-1.0.0b261112-py3-none-any.whl", hash = "sha256:44403e124ef70b28982ac76ebe34324db41198450d38068aee77fb6a485e2336", size = 32202, upload-time = "2026-11-12T18:25:41.513Z" },
+]
+
+[[package]]
 name = "agent-framework-core"
 version = "1.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -125,6 +138,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5f/56/a8120250d128bed162cd73c76d45f6ef9991f3e068f62a8ee060afa3104a/annotated_types-0.8.0.tar.gz", hash = "sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7", size = 15893, upload-time = "2026-07-23T20:16:13.995Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl", hash = "sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0", size = 13427, upload-time = "2026-07-23T20:16:12.938Z" },
+]
+
+[[package]]
+name = "anthropic"
+version = "2.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "docstring-parser" },
+    { name = "httpx2" },
+    { name = "jiter" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/ca/714857a41e333b9292b1db0d642d46256d27b3efe4697df642286ca23ad9/anthropic-2.14.0.tar.gz", hash = "sha256:afb02f4df8efba429ff769bbfd71340d8b244b41ba42c073a45cc307702549fe", size = 2090851, upload-time = "2026-11-24T21:01:49.208Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5d/27/8bbae12e619497c651f35fec779389ab04e6b7b92b022f94390ec82be973/anthropic-2.14.0-py3-none-any.whl", hash = "sha256:5cf986851f61c0858ac88c6f7c28490369a68ff4a89c309849605b764da0664d", size = 2726387, upload-time = "2026-11-24T21:01:46.861Z" },
 ]
 
 [[package]]
@@ -385,6 +417,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b6/b1/d9121a717e0f893c64bd6ca7702614778d7df2a5c309128a002421788516/cryptography-50.0.2-pp311-pypy311_pp73-manylinux_2_34_x86_64.whl", hash = "sha256:1ba34f04897fcdaa73f74145c25f3ec146fbd56593853e88adc2e811303c5f42", size = 4726322, upload-time = "2026-09-30T15:29:54.263Z" },
     { url = "https://files.pythonhosted.org/packages/36/8b/e6d153808bf353e152abd2fd4d8f09670d956ac78379ac46e60d7efbf04c/cryptography-50.0.2-pp311-pypy311_pp80-macosx_11_0_arm64.whl", hash = "sha256:3dc4fd8058cea1644971207d530e1a03a184a805ffc8ebdddf0599d78a331b81", size = 3873097, upload-time = "2026-09-30T15:29:56.097Z" },
     { url = "https://files.pythonhosted.org/packages/ca/1d/1271f287ff7170ddafc2aad36260c4eec20ccd2fea70f38455e9d56d427b/cryptography-50.0.2-pp311-pypy311_pp80-win_amd64.whl", hash = "sha256:7b75de3c8b3be1cdb1052747c929440c3eea46c1bc2cb8a6e3a48388e9b7b452", size = 3805376, upload-time = "2026-09-30T15:29:58.729Z" },
+]
+
+[[package]]
+name = "docstring-parser"
+version = "0.18.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/4d/f332313098c1de1b2d2ff91cf2674415cc7cddab2ca1b01ae29774bd5fdf/docstring_parser-0.18.0.tar.gz", hash = "sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015", size = 29341, upload-time = "2026-04-14T04:09:19.867Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl", hash = "sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b", size = 22484, upload-time = "2026-04-14T04:09:18.638Z" },
 ]
 
 [[package]]
@@ -1395,8 +1436,10 @@ name = "should-cost"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agent-framework-anthropic" },
     { name = "agent-framework-core" },
     { name = "agent-framework-foundry" },
+    { name = "agent-framework-openai" },
     { name = "azure-data-tables" },
     { name = "azure-identity" },
     { name = "azure-storage-blob" },
@@ -1428,8 +1471,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-framework-anthropic" },
     { name = "agent-framework-core", specifier = ">=1.16,<2.0" },
     { name = "agent-framework-foundry", specifier = ">=1.16,<2.0" },
+    { name = "agent-framework-openai", specifier = ">=1.16,<2.0" },
     { name = "azure-data-tables", specifier = ">=12.5,<13.0" },
     { name = "azure-identity", specifier = ">=1.19,<2.0" },
     { name = "azure-storage-blob", specifier = ">=12.23,<13.0" },
