@@ -167,9 +167,20 @@ async def answer_job(
         # bypasses _run_step0 entirely (job.spend_lookup is already set), so it must create
         # the unit itself or the job would reach Step 1 with no units to process.
         job.units = [JobUnit(label=manual_supplier.supplier_name, supplier=manual_supplier)]
-    # For every other reason, the answer is informational — it is folded into the
-    # material-folder document text the next time Step 1 runs for the affected unit(s),
-    # which _process_unit re-reads from job state, not re-downloaded from SharePoint.
+    else:
+        # Informational answer (missing critical field, illegible BOM/drawing, a RED
+        # sanity gate, ...): fold it into the document text, then reset whichever
+        # per-unit field is already set-but-incomplete so the step that raised the
+        # question actually reruns — _process_unit's "if unit.X is None" resume guards
+        # would otherwise treat that step as already done and silently skip it, since the
+        # field was assigned before the missing_info/RED check that raised the signal.
+        job.discovery_documents.append(DiscoveryDocument(filename="user_clarification.txt", text=answer_text))
+        for unit in job.units:
+            if unit.part_facts is not None and unit.part_facts.missing_info:
+                unit.part_facts = None
+            elif unit.sanity_gate is not None and unit.sanity_gate.blocks_slide_output:
+                unit.cost_build = None
+                unit.sanity_gate = None
     job.pending_question = None
     job.status = JobStatus.RUNNING
     await run_job(job, store=store, settings=settings, credential=credential, skip_upload=skip_upload)
