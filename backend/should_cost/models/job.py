@@ -67,6 +67,35 @@ class NeedsInputReason(str, Enum):
     SANITY_GATE_RED = "sanity_gate_red"
 
 
+class StepEventStatus(str, Enum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class StepEvent(BaseModel):
+    """One entry in a JobUnit's live execution trace — this is what the frontend's
+    per-job progress view polls to render which node is currently running, not just a
+    single ``current_step`` value (see the live-trace visualization the engine supports).
+    """
+
+    step: WorkflowStep
+    status: StepEventStatus
+    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    detail: str | None = None
+
+
+class DiscoveryDocument(BaseModel):
+    """One parsed material-folder document, kept on the Job itself (not a transient
+    attribute) so it survives a save/reload round trip — Step 1 for each unit reads these
+    rather than re-downloading from SharePoint on every resume.
+    """
+
+    filename: str
+    text: str
+
+
 class PendingQuestion(BaseModel):
     reason: NeedsInputReason
     question: str
@@ -106,6 +135,13 @@ class JobUnit(BaseModel):
     pre_build_reasoning: PreBuildReasoning | None = None
     proposed_parameters: ProposedParameters | None = None
     deep_dive: DeepDiveResult | None = None
+    cost_build: dict[str, float] | None = Field(
+        default=None,
+        description="Recalculated bucket totals (material_eur, conversion_eur, pl_eur, "
+        "overheads_eur, margin_eur, should_cost_eur, current_price_eur, impact_eur) — "
+        "the single source of truth both the SlideValues file and a rollup unit's parent "
+        "read from, so the two never show different numbers for the same unit.",
+    )
     sanity_gate: SanityGateResult | None = None
     insights: Insights | None = None
     chat_blocks: ChatBlocks | None = None
@@ -113,6 +149,7 @@ class JobUnit(BaseModel):
 
     status: JobStatus = JobStatus.QUEUED
     current_step: WorkflowStep = WorkflowStep.STEP_0_DISCOVERY
+    trace: list[StepEvent] = Field(default_factory=list)
 
 
 class Job(BaseModel):
@@ -127,7 +164,11 @@ class Job(BaseModel):
     failure_reason: str | None = None
 
     spend_lookup: SpendLookupResult | None = None
+    discovery_documents: list[DiscoveryDocument] = Field(default_factory=list)
+    historical_priors: list[str] = Field(default_factory=list)
+    cross_supplier_table: list[dict] = Field(default_factory=list, description="Step 7 — populated once, multi-supplier only")
     units: list[JobUnit] = Field(default_factory=list)
+    trace: list[StepEvent] = Field(default_factory=list, description="Step 0 (pre-unit) trace")
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

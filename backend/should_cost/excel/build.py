@@ -101,18 +101,29 @@ def _plan_input_rows(inputs: list) -> dict[int, int]:
     return row_map
 
 
-def _resolve_calc_line(line: CalcLine, input_row_map: dict[int, int]) -> str:
-    def ref(num: int) -> str:
+def _resolve_calc_line(line: CalcLine, input_row_map: dict[int, int], calc_row_map: dict[str, int]) -> str:
+    """``calc_row_map`` must already contain every id_code in ``line.line_refs`` — the
+    caller only calls this once the full calc_row_map is known (see _build_calculations),
+    which is guaranteed by the ProposedParameters validator requiring line_refs to be
+    forward-only references to earlier lines in the same bucket.
+    """
+
+    def param_ref(num: int) -> str:
         return f"'2. Inputs'!F{input_row_map[num]}"
 
+    def line_ref(id_code: str) -> str:
+        return f"E{calc_row_map[id_code]}"
+
     if line.kind == "ref":
-        return f"={ref(line.param_refs[0])}"
+        return f"={param_ref(line.param_refs[0])}"
     if line.kind == "sum":
-        return "=" + "+".join(ref(n) for n in line.param_refs)
+        return "=" + "+".join(param_ref(n) for n in line.param_refs)
     assert line.kind == "expr" and line.expr_template
     expr = line.expr_template
     for n in line.param_refs:
-        expr = expr.replace(f"{{p{n}}}", ref(n))
+        expr = expr.replace(f"{{p{n}}}", param_ref(n))
+    for ref_id in line.line_refs:
+        expr = expr.replace(f"{{{ref_id}}}", line_ref(ref_id))
     return f"={expr}"
 
 
@@ -134,13 +145,16 @@ def _build_calculations(
     proposed: ProposedParameters, input_row_map: dict[int, int], ref_numbers: dict[str, int]
 ) -> list:
     calc_items: list = []
+    pending_lines: dict[str, CalcLine] = {}
 
     def add_bucket(bucket: Bucket, *, with_sigma: bool) -> None:
         calc_items.append(_BUCKET_SECTION_LABEL[bucket])
         bucket_lines = proposed.calc_lines[bucket]
         for line in bucket_lines:
-            formula = _resolve_calc_line(line, input_row_map)
-            calc_items.append((line.id_code, line.label, line.unit, formula))
+            pending_lines[line.id_code] = line
+            # Placeholder — resolved below once calc_row_map (incl. this line's own row,
+            # and any earlier line it references via line_refs) is known.
+            calc_items.append((line.id_code, line.label, line.unit, ""))
         if with_sigma:
             sigma_unit = bucket_lines[-1].unit if bucket_lines else "€/unit"
             # Placeholder formula — overwritten below once calc-tab row numbers are known.
@@ -165,17 +179,27 @@ def _build_calculations(
     def calc_ref(key: str) -> str:
         return f"E{calc_row_map[key]}"
 
-    material_ids = [ln.id_code for ln in proposed.calc_lines[Bucket.MATERIAL]]
-    conversion_ids = [ln.id_code for ln in proposed.calc_lines[Bucket.CONVERSION]]
-    pl_ids = [ln.id_code for ln in proposed.calc_lines[Bucket.PACKAGING_LOGISTICS]]
-    overheads_ids = [ln.id_code for ln in proposed.calc_lines[Bucket.OVERHEADS]]
-    margin_ids = [ln.id_code for ln in proposed.calc_lines[Bucket.MARGIN]]
+    # Only lines marked contributes_to_bucket_total=True are summed — a helper line (e.g.
+    # a gross-weight intermediate in kg, used only via line_refs) must NOT be added into
+    # the bucket's EUR total, matching the legacy script's own 'Sigma Material' formula
+    # (which sums only the final cost rows, not the gross-weight row before them).
+    def contributing_ids(bucket: Bucket) -> list[str]:
+        return [ln.id_code for ln in proposed.calc_lines[bucket] if ln.contributes_to_bucket_total]
+
+    material_ids = contributing_ids(Bucket.MATERIAL)
+    conversion_ids = contributing_ids(Bucket.CONVERSION)
+    pl_ids = contributing_ids(Bucket.PACKAGING_LOGISTICS)
+    overheads_ids = contributing_ids(Bucket.OVERHEADS)
+    margin_ids = contributing_ids(Bucket.MARGIN)
 
     sigma_formula = lambda ids: "=" + "+".join(calc_ref(i) for i in ids)  # noqa: E731
 
     resolved: list = []
     for item in calc_items:
-        if isinstance(item, tuple) and item[0] == "_SIGMA_C":
+        if isinstance(item, tuple) and item[0] in pending_lines:
+            line = pending_lines[item[0]]
+            resolved.append((item[0], item[1], item[2], _resolve_calc_line(line, input_row_map, calc_row_map)))
+        elif isinstance(item, tuple) and item[0] == "_SIGMA_C":
             label = item[1]
             source_ids = {
                 _BUCKET_SIGMA_LABEL[Bucket.MATERIAL]: material_ids,

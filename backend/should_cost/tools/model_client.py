@@ -1,12 +1,14 @@
-"""The plain chat client used for the three structured model calls.
-
-Deliberately *not* an Agent — these calls have no tools and no multi-turn tool loop (see
-docs/design.md §5 for why only Step 3 gets tool access). Each function here builds the
-messages for one call, passes the relevant Pydantic model as the ``response_format`` of a
-``ChatOptions``, and returns the already-validated, already-parsed model instance from
-``response.value`` — Agent Framework handles the structured-output request and the
-parse/validate step; this module's job is only to assemble the right prompt + context per
-call.
+"""The model-call layer: a plain chat client for three calls, and a tool-using Agent for
+propose_parameters (Step 2) — updated to use tools after review surfaced that
+hand-written CalcLine formulas were a real bug source (see should_cost/tools/
+process_formulas.py's docstring). extract_part_facts, pre_build_reasoning and
+write_insights stay bare structured calls — they have nothing a typed tool would help
+with (see docs/design.md §5). Each function here builds the messages for one call,
+passes the relevant Pydantic model as the ``response_format`` of a ``ChatOptions``, and
+returns the already-validated, already-parsed model instance from ``response.value`` —
+Agent Framework handles the structured-output request and the parse/validate step; this
+module's job is only to assemble the right prompt + context (and, for propose_parameters,
+tools) per call.
 """
 
 from __future__ import annotations
@@ -14,13 +16,17 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from agent_framework import ChatOptions, Message
+from agent_framework import Agent, ChatOptions, Message
 from agent_framework_foundry import FoundryChatClient
 from pydantic import BaseModel
 
 from should_cost.config import Settings
 from should_cost.models.workflow import Insights, PartFacts, PreBuildReasoning, ProposedParameters
 from should_cost.tools.foundry_credentials import build_foundry_credential
+from should_cost.tools.process_formulas import (
+    build_lot_based_setup_cost_calc_line,
+    build_nesting_yield_material_calc_lines,
+)
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -107,22 +113,37 @@ async def propose_parameters(
     benchmarks_reference: str,
     deep_dive_summary: str | None,
 ) -> ProposedParameters:
-    """Step 2 (and folds in the Step 2.5 deep-dive summary, if one was produced)."""
+    """Step 2 (and folds in the Step 2.5 deep-dive summary, if one was produced).
+
+    Tool-using, not a bare structured call: ``build_nesting_yield_material_calc_lines``
+    and ``build_lot_based_setup_cost_calc_line`` (process_formulas.py) are hardcoded,
+    correct-by-construction CalcLine builders for the two costing_accuracy_rules.md
+    rules that give an exact literal formula. The model calls these for the materials/
+    processes they cover and still constructs CalcLine JSON by hand (ref/sum/expr) for
+    everything else — see propose_parameters.md for when each applies. Agent.run with
+    both ``tools=`` and a ``response_format`` runs the full tool loop and then validates
+    the final answer against ProposedParameters, same mechanism as the research agent.
+    """
     deep_dive_block = f"\n\nStep 2.5 deep-dive summary:\n{deep_dive_summary}" if deep_dive_summary else ""
-    return await _structured_call(
-        client,
-        system_text=_shared_hard_rules() + "\n\n" + _load_prompt("propose_parameters.md"),
-        user_text=(
-            f"Component: {component_label}\n\n"
-            f"Step 1 facts (JSON):\n{part_facts.model_dump_json(indent=2)}\n\n"
-            f"Pre-Build Reasoning (JSON):\n{pre_build.model_dump_json(indent=2)}\n\n"
-            f"Reference — bucket_inputs_by_process.md:\n{bucket_inputs_reference}\n\n"
-            f"Reference — benchmarks.md:\n{benchmarks_reference}"
-            f"{deep_dive_block}\n\n"
-            "Produce the full Step 2 parameter proposal now."
-        ),
-        response_format=ProposedParameters,
+    instructions = _shared_hard_rules() + "\n\n" + _load_prompt("propose_parameters.md")
+    user_text = (
+        f"Component: {component_label}\n\n"
+        f"Step 1 facts (JSON):\n{part_facts.model_dump_json(indent=2)}\n\n"
+        f"Pre-Build Reasoning (JSON):\n{pre_build.model_dump_json(indent=2)}\n\n"
+        f"Reference — bucket_inputs_by_process.md:\n{bucket_inputs_reference}\n\n"
+        f"Reference — benchmarks.md:\n{benchmarks_reference}"
+        f"{deep_dive_block}\n\n"
+        "Produce the full Step 2 parameter proposal now."
     )
+    agent = Agent(
+        client=client,
+        instructions=instructions,
+        tools=[build_nesting_yield_material_calc_lines, build_lot_based_setup_cost_calc_line],
+        name="should_cost_propose_parameters_agent",
+    )
+    async with agent:
+        response = await agent.run(user_text, options=ChatOptions(response_format=ProposedParameters))
+    return response.value
 
 
 async def write_insights(

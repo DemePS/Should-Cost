@@ -166,11 +166,25 @@ class CalcLine(BaseModel):
     param_refs: list[int] = Field(
         default_factory=list, description="Parameter numbers (ProposedParameters row numbers) this line uses"
     )
+    line_refs: list[str] = Field(
+        default_factory=list,
+        description="id_codes of EARLIER lines in this same bucket's list that expr_template "
+        "references via {<id_code>} (e.g. a gross-weight line referenced by a cost line that "
+        "needs it) — forward references only, no referencing a line not yet defined.",
+    )
     expr_template: str | None = Field(
         default=None,
         description="Only for kind='expr': an arithmetic expression using {p<n>} placeholders "
-        "for each param_refs entry, e.g. '{p1}/({p2}/100)'. No sheet names, no cell "
-        "addresses — those are substituted by code, never by the model.",
+        "for each param_refs entry and {<id_code>} placeholders for each line_refs entry, e.g. "
+        "'{M1}*{p1}-({M1}-{p2})*{p1}*({p4}/100)'. No sheet names, no cell addresses — those are "
+        "substituted by code, never by the model.",
+    )
+    contributes_to_bucket_total: bool = Field(
+        description="False for an intermediate/helper line whose unit is not the bucket's cost "
+        "unit (e.g. a gross-weight line in kg, used only via line_refs by a later cost line) — "
+        "excluding it from the bucket's Sigma sum is mandatory, not optional: the legacy "
+        "reference script's own 'Sigma Material' formula skips exactly such a row. True for "
+        "every line that is itself a genuine EUR/unit cost contribution."
     )
 
     @model_validator(mode="after")
@@ -216,7 +230,12 @@ class ProposedParameters(BaseModel):
         if len(all_numbers) != len(set(all_numbers)):
             raise ValueError(f"ParameterEstimate.number must be unique across all buckets, got: {all_numbers}")
         valid_numbers = set(all_numbers)
+
+        all_id_codes = [line.id_code for lines in self.calc_lines.values() for line in lines]
+        if len(all_id_codes) != len(set(all_id_codes)):
+            raise ValueError(f"CalcLine.id_code must be unique across all buckets, got: {all_id_codes}")
         for bucket, lines in self.calc_lines.items():
+            seen_ids: set[str] = set()
             for line in lines:
                 unknown = [n for n in line.param_refs if n not in valid_numbers]
                 if unknown:
@@ -224,6 +243,14 @@ class ProposedParameters(BaseModel):
                         f"CalcLine {line.id_code!r} in bucket {bucket.value!r} references "
                         f"unknown parameter number(s) {unknown}; valid numbers: {sorted(valid_numbers)}"
                     )
+                unknown_lines = [ref for ref in line.line_refs if ref not in seen_ids]
+                if unknown_lines:
+                    raise ValueError(
+                        f"CalcLine {line.id_code!r} in bucket {bucket.value!r} references "
+                        f"line_refs {unknown_lines} that are not earlier lines in the same bucket "
+                        f"(seen so far: {sorted(seen_ids)}) — forward references only."
+                    )
+                seen_ids.add(line.id_code)
         return self
 
 

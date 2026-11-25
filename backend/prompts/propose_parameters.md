@@ -69,7 +69,31 @@ and you must list which of C1–C6 you explicitly checked in `calibration_rules_
 
 For each bucket, also provide the Calculation-tab line items that turn your parameters
 into that bucket's €/unit cost, matching `references/output_format_spec.md`'s Calculation
-tab exactly (one `CalcLine` per M/C/P/O/S row). Three kinds only:
+tab exactly (one `CalcLine` per M/C/P/O/S row). Give each line an `id_code` following the
+legacy script's own convention — `M1, M2, M3...` for Material, `C1, C2...` for Conversion,
+`P1, P2...` for Packaging & Logistics, `O1...` for Overheads, `S1` for Margin — **every
+id_code must be unique across your entire response**, the same discipline as parameter
+numbers.
+
+**Use a tool first, when one applies — do not hand-write a formula a tool already
+covers:**
+- The material is a nested/laser-cut sheet-metal part (costing_accuracy_rules.md Rule 1:
+  mandatory nesting yield + scrap credit) → call `build_nesting_yield_material_calc_lines`
+  with the four relevant parameter numbers. It returns the two correctly-ordered,
+  correctly-linked CalcLine objects (a gross-weight helper line and the material-cost
+  line) — copy both into the Material bucket's `calc_lines` exactly as returned.
+- The process needs a setup-cost-per-unit line (costing_accuracy_rules.md Rule 2:
+  mandatory lot-count-in-numerator formula) → call `build_lot_based_setup_cost_calc_line`
+  with the four relevant parameter numbers. Copy the returned CalcLine exactly as
+  returned into the Conversion bucket.
+
+These tools exist because their formulas are easy to get subtly wrong by hand (an
+intermediate helper line double-counted into the bucket total, a setup formula missing
+lot count in the numerator) — when either rule applies, always prefer the tool over
+writing the equivalent `expr_template` yourself.
+
+**For everything the tools don't cover**, construct `CalcLine` entries yourself. Three
+kinds only:
 - `kind="ref"`: the line is exactly one parameter's value (e.g. a fastener total already
   expressed in €/unit) — `param_refs=[<that parameter's number>]`.
 - `kind="sum"`: the line is the sum of several parameters' values — list all of them in
@@ -79,6 +103,23 @@ tab exactly (one `CalcLine` per M/C/P/O/S row). Three kinds only:
   `param_refs`, e.g. `"{p1}/({p2}/100)"` for `price / (yield/100)`. Use only `+ - * / ( )`
   and the placeholders — never a sheet name or cell address; those are substituted by
   code afterwards, never by you.
+
+**If a formula needs an intermediate result you already computed in an earlier line**
+(e.g. Rule 1's net cost needs the gross weight you computed in a prior line, not a
+re-derivation of it) — do NOT inline the earlier line's formula a second time. Instead,
+reference that earlier line's `id_code` directly in `expr_template` as `{<id_code>}` and
+list it in `line_refs`, e.g. a gross-weight line `M1` followed by a net-cost line `M2`
+with `line_refs=["M1"]` and `expr_template="{M1}*{p1}-({M1}-{p2})*{p1}*({p4}/100)"`.
+`line_refs` may only point at a line that appears *earlier* in the same bucket's list —
+never a later line, never a line from a different bucket.
+
+**Every line must also set `contributes_to_bucket_total`** — `false` for a helper/
+intermediate line whose unit is not the bucket's €/unit cost (e.g. the gross-weight line
+above, which is in kg) and is only ever used via `line_refs` by a later line; `true` for
+every line that is itself a genuine €/unit cost contribution to sum into the bucket's
+total. Get this wrong and the bucket total silently adds a non-cost quantity (e.g. a
+weight in kg) into a €/unit sum — the legacy reference script's own `Σ Material` formula
+only sums the final cost rows, never the gross-weight row before them; match that.
 
 Follow the exact formula logic given in `references/costing_accuracy_rules.md` (Rules
 1–6) and `references/output_format_spec.md` for the bucket/process you selected — e.g. the

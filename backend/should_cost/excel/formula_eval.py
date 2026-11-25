@@ -57,7 +57,12 @@ def eval_arithmetic(expression: str) -> float:
     return _eval_node(tree)
 
 
-def eval_calc_line(line: CalcLine, param_values: dict[int, float]) -> float:
+def eval_calc_line(line: CalcLine, param_values: dict[int, float], line_values: dict[str, float] | None = None) -> float:
+    """``line_values`` must already contain every id_code in ``line.line_refs`` — the
+    caller (compute_cost_build) guarantees this by evaluating each bucket's lines in
+    order, same as excel/build.py resolves them in order.
+    """
+    line_values = line_values or {}
     if line.kind == "ref":
         return param_values[line.param_refs[0]]
     if line.kind == "sum":
@@ -66,6 +71,8 @@ def eval_calc_line(line: CalcLine, param_values: dict[int, float]) -> float:
     expr = line.expr_template
     for n in line.param_refs:
         expr = expr.replace(f"{{p{n}}}", f"({param_values[n]})")
+    for ref_id in line.line_refs:
+        expr = expr.replace(f"{{{ref_id}}}", f"({line_values[ref_id]})")
     return eval_arithmetic(expr)
 
 
@@ -76,7 +83,17 @@ def compute_cost_build(proposed: ProposedParameters, param_values: dict[int, flo
     """
 
     def bucket_total(bucket: Bucket) -> float:
-        return sum(eval_calc_line(line, param_values) for line in proposed.calc_lines[bucket])
+        line_values: dict[str, float] = {}
+        total = 0.0
+        for line in proposed.calc_lines[bucket]:
+            value = eval_calc_line(line, param_values, line_values)
+            line_values[line.id_code] = value
+            # A helper/intermediate line (e.g. gross weight in kg) is cached for later
+            # line_refs lookups but must not itself be added to the EUR total — see
+            # CalcLine.contributes_to_bucket_total.
+            if line.contributes_to_bucket_total:
+                total += value
+        return total
 
     material = bucket_total(Bucket.MATERIAL)
     conversion = bucket_total(Bucket.CONVERSION)
