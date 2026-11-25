@@ -1,13 +1,14 @@
 """Step 3 — the tool-using research agent. The only step that gets tool access.
 
 Tools:
-- ``web_search``: the Microsoft Agent Framework hosted web-search tool
-  (``client.get_web_search_tool()`` — Bing grounding on Foundry, Anthropic's own native
-  web search tool on Anthropic) when ``SEARCH_PROVIDER=hosted``, or a Tavily-backed
-  function tool when ``SEARCH_PROVIDER=tavily``. ``config.Settings`` rejects
-  ``SEARCH_PROVIDER=hosted`` with ``MODEL_PROVIDER=deepseek`` outright — DeepSeek's
-  OpenAI-compatible API has no hosted search, so there's nothing for
-  ``get_web_search_tool()`` to call.
+- ``web_search``: a hosted/server-side web-search tool when ``SEARCH_PROVIDER=hosted`` —
+  ``client.get_web_search_tool()`` (Bing grounding on Foundry, Anthropic's own native web
+  search tool on Anthropic), or, on DeepSeek, a raw ``{"type": "deepseek_web_search"}``
+  tool dict (see ``_build_deepseek_web_search_tool`` — DeepSeek's hosted tool is *not* the
+  same API shape as OpenAI's own ``get_web_search_tool()``, so it can't be reused here
+  even though DeepSeek is reached through ``OpenAIChatClient``). DeepSeek's hosted tool is
+  only documented for the ``deepseek-flash`` model — ``config.Settings`` enforces that.
+  Otherwise, a Tavily-backed function tool when ``SEARCH_PROVIDER=tavily``.
 - ``fetch_page``: a plain function tool — fetches a URL and returns text + a best-effort
   publication date, so the agent can confirm a result before citing it.
 - ``submit_parameter``: a plain function tool that appends to this run's result list —
@@ -163,12 +164,22 @@ def build_tavily_search_tool(api_key: str):
     return web_search
 
 
+# DeepSeek's hosted search is a server tool declared as a raw {"type": ...} dict in the
+# request's tools array (api-docs.deepseek.com/guides/web_tools), not OpenAI's own
+# get_web_search_tool() shape — OpenAIChatClient (which DeepSeek is reached through, see
+# model_client.build_chat_client) passes any dict tool it doesn't recognize straight
+# through unchanged, which is exactly what this needs. Unverified against a live DeepSeek
+# endpoint (no API key available in this environment) — the startup self-test
+# (run_search_self_test) is what actually confirms this works for a given account/model.
+_DEEPSEEK_WEB_SEARCH_TOOL = {"type": "deepseek_web_search"}
+
+
 def _build_web_search_tool(settings: Settings, chat_client: BaseChatClient):
     if settings.search_provider == SearchProvider.HOSTED:
+        if settings.model_provider.value == "deepseek":
+            return _DEEPSEEK_WEB_SEARCH_TOOL
         # get_web_search_tool() is defined by every concrete chat-client connector
-        # (Foundry, Anthropic, OpenAI) but not declared on the shared BaseChatClient —
-        # config.Settings already rejects the one provider (deepseek) that lacks a real
-        # hosted-search backend for it.
+        # (Foundry, Anthropic) but not declared on the shared BaseChatClient.
         return chat_client.get_web_search_tool()  # type: ignore[attr-defined]
     assert settings.tavily_api_key
     return build_tavily_search_tool(settings.tavily_api_key)
@@ -211,8 +222,7 @@ async def run_research(
 async def run_search_self_test(settings: Settings, chat_client: BaseChatClient) -> str:
     """Run one real search with the configured provider; raise with a clear message if it
     fails, rather than discovering at the first real job that hosted search silently
-    doesn't work for this model/provider combination (the Microsoft docs are inconsistent
-    on hosted web-search support across Foundry model providers).
+    doesn't work for this model/provider combination.
     """
     tool = _build_web_search_tool(settings, chat_client)
     probe_agent = Agent(
@@ -225,11 +235,13 @@ async def run_search_self_test(settings: Settings, chat_client: BaseChatClient) 
         async with probe_agent:
             await probe_agent.run("Search for: Eurostat industrial electricity price 2025")
     except Exception as exc:  # noqa: BLE001 - deliberately broad: this is a startup gate
-        hosted_hint = (
-            "confirm a Bing grounding connection is configured on the Foundry project (see docs/design.md)"
-            if settings.model_provider.value == "foundry"
-            else "confirm Anthropic's native web search tool is enabled for this API key/model"
-        )
+        hosted_hints = {
+            "foundry": "confirm a Bing grounding connection is configured on the Foundry project (see docs/design.md)",
+            "anthropic": "confirm Anthropic's native web search tool is enabled for this API key/model",
+            "deepseek": "confirm MODEL_DEPLOYMENT=deepseek-flash "
+            "(deepseek_web_search is only documented for that model)",
+        }
+        hosted_hint = hosted_hints[settings.model_provider.value]
         raise SearchSelfTestError(
             f"SEARCH_PROVIDER={settings.search_provider.value} self-test failed: {exc}. "
             f"If hosted, {hosted_hint}; if tavily, confirm TAVILY_API_KEY is valid."

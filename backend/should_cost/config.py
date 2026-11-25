@@ -126,11 +126,13 @@ class Settings(BaseSettings):
         elif self.model_provider == ModelProvider.DEEPSEEK:
             if not self.deepseek_api_key:
                 raise ValueError("MODEL_PROVIDER=deepseek requires DEEPSEEK_API_KEY")
-            if self.search_provider == SearchProvider.HOSTED:
+            if self.search_provider == SearchProvider.HOSTED and self.model_deployment != "deepseek-flash":
                 raise ValueError(
-                    "SEARCH_PROVIDER=hosted is not available with MODEL_PROVIDER=deepseek "
-                    "(DeepSeek's OpenAI-compatible API has no hosted web-search tool); "
-                    "set SEARCH_PROVIDER=tavily"
+                    "SEARCH_PROVIDER=hosted with MODEL_PROVIDER=deepseek requires "
+                    "MODEL_DEPLOYMENT=deepseek-flash — DeepSeek's hosted web-search tool "
+                    "(deepseek_web_search) is only documented for that model. Set "
+                    "MODEL_DEPLOYMENT=deepseek-flash, or use SEARCH_PROVIDER=tavily instead "
+                    "if you need a different DeepSeek model for the other steps."
                 )
         if self.search_provider == SearchProvider.TAVILY and not self.tavily_api_key:
             raise ValueError("SEARCH_PROVIDER=tavily requires TAVILY_API_KEY")

@@ -122,9 +122,16 @@ def test_model_provider_deepseek_builds_openai_compatible_client() -> None:
     assert isinstance(client, OpenAIChatClient)
 
 
-def test_model_provider_deepseek_rejects_hosted_search() -> None:
-    with pytest.raises(Exception, match="not available with MODEL_PROVIDER=deepseek"):
+def test_model_provider_deepseek_hosted_search_requires_deepseek_flash() -> None:
+    # BASE_ENV's MODEL_DEPLOYMENT is "gpt-4o", not "deepseek-flash" — DeepSeek's hosted
+    # web-search tool (deepseek_web_search) is only documented for deepseek-flash.
+    with pytest.raises(Exception, match="requires MODEL_DEPLOYMENT=deepseek-flash"):
         _settings(MODEL_PROVIDER="deepseek", DEEPSEEK_API_KEY="sk-ds-abc")
+
+
+def test_model_provider_deepseek_hosted_search_allowed_with_deepseek_flash() -> None:
+    settings = _settings(MODEL_PROVIDER="deepseek", DEEPSEEK_API_KEY="sk-ds-abc", MODEL_DEPLOYMENT="deepseek-flash")
+    assert settings.search_provider.value == "hosted"
 
 
 def test_search_provider_defaults_to_hosted_no_key_needed() -> None:
