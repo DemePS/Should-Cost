@@ -13,12 +13,15 @@ tools) per call.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+import structlog
 from agent_framework import Agent, BaseChatClient, ChatOptions, Message
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from should_cost.config import ModelProvider, Settings
 from should_cost.models.workflow import Insights, PartFacts, PreBuildReasoning, ProposedParameters
@@ -138,9 +141,48 @@ def _wire_response_format(response_format: type[BaseModel], settings: Settings) 
 # tools (propose_parameters, the research agent); DeepSeek's own hosted tools (e.g.
 # deepseek_web_search) are resolved server-side in one round trip and are unaffected.
 def _local_tool_call_options(settings: Settings, response_format: type[BaseModel] | dict[str, Any]) -> ChatOptions:
+    # ChatOptions' own TypedDict stub only declares response_format as Mapping | None —
+    # tighter than what it actually accepts at runtime (a Pydantic class, same as every
+    # other response_format= call site in this module).
     if settings.model_provider is ModelProvider.DEEPSEEK:
-        return ChatOptions(response_format=response_format, store=False)
-    return ChatOptions(response_format=response_format)
+        return ChatOptions(response_format=response_format, store=False)  # type: ignore[typeddict-item]
+    return ChatOptions(response_format=response_format)  # type: ignore[typeddict-item]
+
+
+_logger = structlog.get_logger(__name__)
+_T = TypeVar("_T")
+
+# Retries only a response that failed to parse as the expected structured output
+# (empty/truncated/invalid JSON) — a transient model-call flake seen live against
+# DeepSeek ("Response text is not valid JSON: Expecting value..."), not a schema/logic
+# bug. Covers both response_format paths: the DeepSeek lenient-dict path raises a plain
+# ValueError (see _wire_response_format's docstring); the Foundry/Anthropic path, where
+# agent_framework auto-parses via Pydantic's model_validate_json, raises
+# pydantic.ValidationError on the same kind of malformed/empty text (confirmed:
+# PartFacts.model_validate_json("") raises pydantic.ValidationError) — so this also
+# protects Foundry/Anthropic, not just DeepSeek. Never retries a 400 Bad Request-style
+# ChatClientException (a real schema/logic bug, as debugged above) — retrying that would
+# just repeat the same failure.
+_RETRYABLE_PARSE_ERRORS = (ValueError, ValidationError)
+
+
+def _log_retry(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    _logger.warning("model_response_parse_retry", attempt=retry_state.attempt_number, error=str(exc))
+
+
+async def _call_retrying(coro_factory: Callable[[], Awaitable[_T]]) -> _T:
+    @retry(
+        retry=retry_if_exception_type(_RETRYABLE_PARSE_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(2),
+        before_sleep=_log_retry,
+        reraise=True,
+    )
+    async def _inner() -> _T:
+        return await coro_factory()
+
+    return await _inner()
 
 
 async def _structured_call(
@@ -148,10 +190,14 @@ async def _structured_call(
 ):
     messages = _messages(system_text, user_text)
     wire_format = _wire_response_format(response_format, settings)
-    response = await client.get_response(messages, options=ChatOptions(response_format=wire_format))
-    if isinstance(wire_format, dict):
-        return response_format.model_validate(response.value)
-    return response.value
+
+    async def _call() -> Any:
+        response = await client.get_response(messages, options=ChatOptions(response_format=wire_format))
+        if isinstance(wire_format, dict):
+            return response_format.model_validate(response.value)
+        return response.value
+
+    return await _call_retrying(_call)
 
 
 async def extract_part_facts(
@@ -239,11 +285,15 @@ async def propose_parameters(
         tools=PROCESS_FORMULA_TOOLS,
         name="should_cost",
     )
-    async with agent:
-        response = await agent.run(user_text, options=_local_tool_call_options(settings, wire_format))
-    if isinstance(wire_format, dict):
-        return ProposedParameters.model_validate(response.value)
-    return response.value
+
+    async def _call() -> Any:
+        async with agent:
+            response = await agent.run(user_text, options=_local_tool_call_options(settings, wire_format))
+        if isinstance(wire_format, dict):
+            return ProposedParameters.model_validate(response.value)
+        return response.value
+
+    return await _call_retrying(_call)
 
 
 async def write_insights(
