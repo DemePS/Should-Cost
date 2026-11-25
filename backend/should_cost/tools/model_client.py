@@ -126,6 +126,23 @@ def _wire_response_format(response_format: type[BaseModel], settings: Settings) 
     }
 
 
+# DeepSeek's OpenAI-Responses-compatible endpoint doesn't honor previous_response_id
+# conversation chaining (confirmed live, isolated to a single local-function-tool call
+# with no response_format involved): agent_framework_openai relies on that chaining to
+# avoid resending the whole conversation between a local function tool's call and its
+# output, so round 2 sends only the function_call_output and DeepSeek replies "No tool
+# call found for tool output with call_id ..." — it never received the matching
+# function_call (the client assumed the server already had it via previous_response_id).
+# ChatOptions(store=False) makes the client resend full history every turn instead of
+# relying on that chaining, which avoids it. Only matters for calls with local function
+# tools (propose_parameters, the research agent); DeepSeek's own hosted tools (e.g.
+# deepseek_web_search) are resolved server-side in one round trip and are unaffected.
+def _local_tool_call_options(settings: Settings, response_format: type[BaseModel] | dict[str, Any]) -> ChatOptions:
+    if settings.model_provider is ModelProvider.DEEPSEEK:
+        return ChatOptions(response_format=response_format, store=False)
+    return ChatOptions(response_format=response_format)
+
+
 async def _structured_call(
     client: BaseChatClient, *, system_text: str, user_text: str, response_format: type[BaseModel], settings: Settings
 ):
@@ -223,7 +240,7 @@ async def propose_parameters(
         name="should_cost",
     )
     async with agent:
-        response = await agent.run(user_text, options=ChatOptions(response_format=wire_format))
+        response = await agent.run(user_text, options=_local_tool_call_options(settings, wire_format))
     if isinstance(wire_format, dict):
         return ProposedParameters.model_validate(response.value)
     return response.value

@@ -26,6 +26,27 @@ inferred from documents — do not populate them here even if a document states 
 different number; if you notice a discrepancy, note it as text, but the PPE file's
 values always win downstream.
 
+**`missing_info` is for gaps nothing downstream can resolve** — a part geometry, weight,
+drawing, or BOM that is genuinely absent from every source. It is **never** for live
+market/benchmark data (metal spot prices such as LME copper, steel/resin price indices,
+energy tariffs, wages, freight rates) — you have no web-search tool here, but that is
+expected: Step 3 (a separate agent, with a web-search tool) researches exactly these
+time-sensitive parameters automatically, right after this step. Do not list "cannot
+retrieve the current copper price" (or any other live benchmark) in `missing_info`; it is
+not a gap in your extraction, it is the next step's job.
+
+**Raw material purchased directly by weight (no discrete finished part in scope):** some
+material IDs are coil/strip/bar/granulate stock the HAGER PPE file prices per kg (or
+other mass/volume UoM), with no downstream part, drawing, or cut length anywhere in
+scope. None of the three weight-derivation tiers apply (there is no discrete part to
+bound), and that is not a gap — it is the correct reading of the UoM column. In that case
+set `weight` to 1 unit of the PPE Unit of Measure (e.g. 1 kg → `grams_per_part: 1000`),
+`tier` reflecting that this is definitional rather than derived, and do not add it to
+`missing_info`. Genuinely unresolved composition details (e.g. an unstated plating split
+on a clad/plated strip) still get a low-confidence note in the relevant field (or, if
+nothing else fits, `missing_info` — but only the specific unresolved composition
+question, phrased so Step 2/3 can act on it, not "no weight is available").
+
 ### Sub-Assembly Detection Protocol (mandatory when multiple drawings are present)
 
 Apply the following checks when processing documents:

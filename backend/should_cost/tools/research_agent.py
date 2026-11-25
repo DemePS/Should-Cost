@@ -211,10 +211,20 @@ async def run_research(
     """
     agent, session = build_research_agent(settings, chat_client)
     worklist_text = "\n".join(f"- {t.name} ({t.unit}){f' — {t.hint}' if t.hint else ''}" for t in targets)
+    # store=False for deepseek: fetch_page/submit_parameter are local function tools, and
+    # DeepSeek's Responses-compatible endpoint doesn't honor previous_response_id
+    # conversation chaining the way agent_framework_openai assumes — see
+    # should_cost/tools/model_client.py's _local_tool_call_options for the confirmed
+    # root cause ("No tool call found for tool output with call_id ..." otherwise).
+    options = (
+        ChatOptions(tool_choice="auto", store=False)
+        if settings.model_provider.value == "deepseek"
+        else ChatOptions(tool_choice="auto")
+    )
     async with agent:
         await agent.run(
             f"Research the following parameters and call submit_parameter for each:\n{worklist_text}",
-            options=ChatOptions(tool_choice="auto"),
+            options=options,
         )
     return session.collected
 
