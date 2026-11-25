@@ -167,7 +167,7 @@ async def propose_parameters(
         client=client,
         instructions=instructions,
         tools=PROCESS_FORMULA_TOOLS,
-        name="should_cost_propose_parameters_agent",
+        name="should_cost",
     )
     async with agent:
         response = await agent.run(user_text, options=ChatOptions(response_format=ProposedParameters))
