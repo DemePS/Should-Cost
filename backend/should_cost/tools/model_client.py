@@ -24,9 +24,34 @@ from should_cost.config import Settings
 from should_cost.models.workflow import Insights, PartFacts, PreBuildReasoning, ProposedParameters
 from should_cost.tools.foundry_credentials import build_foundry_credential
 from should_cost.tools.process_formulas import (
+    build_batch_setup_cost_calc_line,
+    build_cnc_machining_calc_line,
+    build_cycle_time_machine_conversion_calc_line,
+    build_electronics_assembly_calc_lines,
+    build_extrusion_conversion_calc_lines,
+    build_forging_conversion_calc_line,
     build_lot_based_setup_cost_calc_line,
     build_nesting_yield_material_calc_lines,
+    build_stamping_conversion_calc_line,
+    build_welded_assembly_calc_line,
 )
+
+# Every process_formulas.py tool — see that module's own table for which rule/process
+# family each one covers. Passed as a block so propose_parameters always offers the full
+# set; the prompt (propose_parameters.md) tells the model which one applies to a given
+# process, falling back to generic CalcLine construction for anything none of these cover.
+PROCESS_FORMULA_TOOLS = [
+    build_nesting_yield_material_calc_lines,
+    build_lot_based_setup_cost_calc_line,
+    build_cycle_time_machine_conversion_calc_line,
+    build_batch_setup_cost_calc_line,
+    build_cnc_machining_calc_line,
+    build_stamping_conversion_calc_line,
+    build_extrusion_conversion_calc_lines,
+    build_forging_conversion_calc_line,
+    build_electronics_assembly_calc_lines,
+    build_welded_assembly_calc_line,
+]
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
 
@@ -115,14 +140,17 @@ async def propose_parameters(
 ) -> ProposedParameters:
     """Step 2 (and folds in the Step 2.5 deep-dive summary, if one was produced).
 
-    Tool-using, not a bare structured call: ``build_nesting_yield_material_calc_lines``
-    and ``build_lot_based_setup_cost_calc_line`` (process_formulas.py) are hardcoded,
-    correct-by-construction CalcLine builders for the two costing_accuracy_rules.md
-    rules that give an exact literal formula. The model calls these for the materials/
-    processes they cover and still constructs CalcLine JSON by hand (ref/sum/expr) for
-    everything else — see propose_parameters.md for when each applies. Agent.run with
-    both ``tools=`` and a ``response_format`` runs the full tool loop and then validates
-    the final answer against ProposedParameters, same mechanism as the research agent.
+    Tool-using, not a bare structured call: ``PROCESS_FORMULA_TOOLS`` (process_formulas.py)
+    are ten hardcoded, correct-by-construction CalcLine builders — one per
+    costing_accuracy_rules.md rule with an exact literal formula (Rule 1, Rule 2) and one
+    per process family in bucket_inputs_by_process.md (thermoforming/injection-moulding/
+    die-casting share one cycle-time formula; CNC; stamping; extrusion; forging;
+    electronics; welded-subassembly Layer 2). The model calls whichever tool matches the
+    process it identified, and still constructs CalcLine JSON by hand (ref/sum/expr) for
+    anything none of the ten cover — see propose_parameters.md for when each applies.
+    Agent.run with both ``tools=`` and a ``response_format`` runs the full tool loop and
+    then validates the final answer against ProposedParameters, same mechanism as the
+    research agent.
     """
     deep_dive_block = f"\n\nStep 2.5 deep-dive summary:\n{deep_dive_summary}" if deep_dive_summary else ""
     instructions = _shared_hard_rules() + "\n\n" + _load_prompt("propose_parameters.md")
@@ -138,7 +166,7 @@ async def propose_parameters(
     agent = Agent(
         client=client,
         instructions=instructions,
-        tools=[build_nesting_yield_material_calc_lines, build_lot_based_setup_cost_calc_line],
+        tools=PROCESS_FORMULA_TOOLS,
         name="should_cost_propose_parameters_agent",
     )
     async with agent:

@@ -76,21 +76,24 @@ id_code must be unique across your entire response**, the same discipline as par
 numbers.
 
 **Use a tool first, when one applies — do not hand-write a formula a tool already
-covers:**
-- The material is a nested/laser-cut sheet-metal part (costing_accuracy_rules.md Rule 1:
-  mandatory nesting yield + scrap credit) → call `build_nesting_yield_material_calc_lines`
-  with the four relevant parameter numbers. It returns the two correctly-ordered,
-  correctly-linked CalcLine objects (a gross-weight helper line and the material-cost
-  line) — copy both into the Material bucket's `calc_lines` exactly as returned.
-- The process needs a setup-cost-per-unit line (costing_accuracy_rules.md Rule 2:
-  mandatory lot-count-in-numerator formula) → call `build_lot_based_setup_cost_calc_line`
-  with the four relevant parameter numbers. Copy the returned CalcLine exactly as
-  returned into the Conversion bucket.
+covers.** Ten tools exist, one per rule/process family — call whichever matches what you
+identified in Step 1.5, copy its returned CalcLine(s) exactly as returned into the right
+bucket, and never write the equivalent `expr_template` by hand when a tool already
+covers it (their formulas are easy to get subtly wrong — a helper line double-counted
+into the bucket total, a setup formula missing lot count in the numerator):
 
-These tools exist because their formulas are easy to get subtly wrong by hand (an
-intermediate helper line double-counted into the bucket total, a setup formula missing
-lot count in the numerator) — when either rule applies, always prefer the tool over
-writing the equivalent `expr_template` yourself.
+| Tool | When to call it |
+|---|---|
+| `build_nesting_yield_material_calc_lines` | Material bucket — nested/laser-cut sheet metal (Rule 1) |
+| `build_lot_based_setup_cost_calc_line` | Conversion — any process needing a lot-count-based setup line (Rule 2), when the process doesn't use batch size instead |
+| `build_cycle_time_machine_conversion_calc_line` | Conversion — thermoforming, injection moulding, or die casting |
+| `build_batch_setup_cost_calc_line` | Conversion — CNC machining's setup line (batch-size based, not lot-count) |
+| `build_cnc_machining_calc_line` | Conversion — CNC machining's machine/operator/tooling line |
+| `build_stamping_conversion_calc_line` | Conversion — stamping / sheet metal forming (pair with the nesting-yield tool above for Material, since stamping's "blanking yield" is the same Rule 1 concept) |
+| `build_extrusion_conversion_calc_lines` | Conversion — extrusion |
+| `build_forging_conversion_calc_line` | Conversion — forging |
+| `build_electronics_assembly_calc_lines` | Material (BoM line) and/or Conversion (process line) — electronics / PCB assembly |
+| `build_welded_assembly_calc_line` | Conversion — welded subassemblies, Layer 2 (the assembly operation itself; apply the nesting-yield and stamping tools per child component for Layer 1) |
 
 **For everything the tools don't cover**, construct `CalcLine` entries yourself. Three
 kinds only:
