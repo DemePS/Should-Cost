@@ -18,7 +18,10 @@ dependencies = [
   "python-pptx>=1.0,<2.0",
   "pandas>=2.2,<3.0",
   "pyxlsb>=1.0,<2.0",
-  "agent-framework>=0.1,<1.0",
+  # Selective install (lighter than the `agent-framework` meta-package): core
+  # chat-client/agent abstractions + the Microsoft Foundry integration only.
+  "agent-framework-core>=1.16,<2.0",
+  "agent-framework-foundry>=1.16,<2.0",
   "tenacity>=9.0,<10.0",
   "structlog>=24.4,<25.0",
   "opencensus-ext-azure>=1.1,<2.0",
