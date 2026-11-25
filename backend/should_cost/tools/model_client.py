@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from agent_framework import Agent, BaseChatClient, ChatOptions, Message
 from pydantic import BaseModel
@@ -104,14 +105,40 @@ def build_chat_client(settings: Settings) -> BaseChatClient:
     )
 
 
-async def _structured_call(client: BaseChatClient, *, system_text: str, user_text: str, response_format: type[BaseModel]):
+# DeepSeek's Responses-API-compatible endpoint rejects the standard OpenAI strict-mode
+# JSON schema shape every Optional/"X | None" field produces (`{"anyOf": [{"type": X},
+# {"type": "null"}]}`) with "Invalid json schema: field `anyOf`: missing field `type`" —
+# confirmed against the live API. strict=False avoids it (also confirmed live); the cost
+# is that agent_framework no longer auto-parses the response into the Pydantic model
+# (Mapping-shaped response_format only gets json.loads'd — see agent_framework._types
+# ._parse_structured_response_value), so _structured_call and propose_parameters below
+# validate the raw dict into the model themselves in that case.
+def _wire_response_format(response_format: type[BaseModel], settings: Settings) -> type[BaseModel] | dict[str, Any]:
+    if settings.model_provider is not ModelProvider.DEEPSEEK:
+        return response_format
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": response_format.__name__,
+            "schema": response_format.model_json_schema(),
+            "strict": False,
+        },
+    }
+
+
+async def _structured_call(
+    client: BaseChatClient, *, system_text: str, user_text: str, response_format: type[BaseModel], settings: Settings
+):
     messages = _messages(system_text, user_text)
-    response = await client.get_response(messages, options=ChatOptions(response_format=response_format))
+    wire_format = _wire_response_format(response_format, settings)
+    response = await client.get_response(messages, options=ChatOptions(response_format=wire_format))
+    if isinstance(wire_format, dict):
+        return response_format.model_validate(response.value)
     return response.value
 
 
 async def extract_part_facts(
-    client: BaseChatClient, *, document_text: str, ppe_context: str
+    client: BaseChatClient, *, document_text: str, ppe_context: str, settings: Settings
 ) -> PartFacts:
     """Step 1."""
     return await _structured_call(
@@ -123,6 +150,7 @@ async def extract_part_facts(
             f"Retrieved document text:\n{document_text}"
         ),
         response_format=PartFacts,
+        settings=settings,
     )
 
 
@@ -132,6 +160,7 @@ async def pre_build_reasoning(
     component_label: str,
     part_facts: PartFacts,
     bucket_inputs_reference: str,
+    settings: Settings,
 ) -> PreBuildReasoning:
     """Step 1.5 — called before propose_parameters; its ComplexityFlags decide (in code,
     not here) whether Step 2.5 runs before the parameter call below.
@@ -146,6 +175,7 @@ async def pre_build_reasoning(
             "Produce the Pre-Build Reasoning block only. Do not propose parameters yet."
         ),
         response_format=PreBuildReasoning,
+        settings=settings,
     )
 
 
@@ -158,6 +188,7 @@ async def propose_parameters(
     bucket_inputs_reference: str,
     benchmarks_reference: str,
     deep_dive_summary: str | None,
+    settings: Settings,
 ) -> ProposedParameters:
     """Step 2 (and folds in the Step 2.5 deep-dive summary, if one was produced).
 
@@ -184,6 +215,7 @@ async def propose_parameters(
         f"{deep_dive_block}\n\n"
         "Produce the full Step 2 parameter proposal now."
     )
+    wire_format = _wire_response_format(ProposedParameters, settings)
     agent = Agent(
         client=client,
         instructions=instructions,
@@ -191,7 +223,9 @@ async def propose_parameters(
         name="should_cost",
     )
     async with agent:
-        response = await agent.run(user_text, options=ChatOptions(response_format=ProposedParameters))
+        response = await agent.run(user_text, options=ChatOptions(response_format=wire_format))
+    if isinstance(wire_format, dict):
+        return ProposedParameters.model_validate(response.value)
     return response.value
 
 
@@ -203,6 +237,7 @@ async def write_insights(
     cost_build_summary: str,
     sanity_gate_summary: str,
     parameters_summary: str,
+    settings: Settings,
 ) -> Insights:
     """Steps 5.5 + 6 — only called once the sanity gate is GREEN or YELLOW."""
     return await _structured_call(
@@ -215,4 +250,5 @@ async def write_insights(
             f"Parameters (with sources):\n{parameters_summary}"
         ),
         response_format=Insights,
+        settings=settings,
     )

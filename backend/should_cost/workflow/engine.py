@@ -197,7 +197,9 @@ async def _process_unit(unit: JobUnit, job: Job, *, chat_client, credential, set
     if unit.part_facts is None:
         unit.current_step = WorkflowStep.STEP_1_EXTRACT_FACTS
         _trace(unit, WorkflowStep.STEP_1_EXTRACT_FACTS, StepEventStatus.STARTED)
-        unit.part_facts = await model_client.extract_part_facts(chat_client, document_text=document_text, ppe_context=ppe_context)
+        unit.part_facts = await model_client.extract_part_facts(
+            chat_client, document_text=document_text, ppe_context=ppe_context, settings=settings
+        )
         if unit.part_facts.missing_info:
             _trace(unit, WorkflowStep.STEP_1_EXTRACT_FACTS, StepEventStatus.FAILED, detail="missing_info")
             await _persist(store, job)
@@ -213,7 +215,11 @@ async def _process_unit(unit: JobUnit, job: Job, *, chat_client, credential, set
         _trace(unit, WorkflowStep.STEP_1_5_PRE_BUILD_REASONING, StepEventStatus.STARTED)
         bucket_ref = _read_reference("bucket_inputs_by_process.md")
         unit.pre_build_reasoning = await model_client.pre_build_reasoning(
-            chat_client, component_label=unit.label, part_facts=unit.part_facts, bucket_inputs_reference=bucket_ref
+            chat_client,
+            component_label=unit.label,
+            part_facts=unit.part_facts,
+            bucket_inputs_reference=bucket_ref,
+            settings=settings,
         )
         _trace(unit, WorkflowStep.STEP_1_5_PRE_BUILD_REASONING, StepEventStatus.COMPLETED)
         await _persist(store, job)
@@ -241,6 +247,7 @@ async def _process_unit(unit: JobUnit, job: Job, *, chat_client, credential, set
             bucket_inputs_reference=bucket_ref,
             benchmarks_reference=benchmarks_ref,
             deep_dive_summary=deep_dive_summary,
+            settings=settings,
         )
         _trace(unit, WorkflowStep.STEP_2_PROPOSE_PARAMETERS, StepEventStatus.COMPLETED)
         await _persist(store, job)
@@ -334,6 +341,7 @@ async def _process_unit(unit: JobUnit, job: Job, *, chat_client, credential, set
             cost_build=unit.cost_build,
             sanity_gate=unit.sanity_gate,
             proposed=unit.proposed_parameters,
+            settings=settings,
         )
         unit.chat_blocks = build_chat_blocks(
             material_id=job.material_id,

@@ -91,6 +91,7 @@ async def run_write_insights(
     cost_build: dict[str, float],
     sanity_gate: SanityGateResult,
     proposed: ProposedParameters,
+    settings,
 ) -> Insights:
     parameters_summary = "\n".join(
         f"[{bucket.value}] #{p.number} {p.name} = {p.base} {p.unit} (source: {p.source.name})"
@@ -104,4 +105,5 @@ async def run_write_insights(
         cost_build_summary=str(cost_build),
         sanity_gate_summary=sanity_gate.model_dump_json(indent=2),
         parameters_summary=parameters_summary,
+        settings=settings,
     )
