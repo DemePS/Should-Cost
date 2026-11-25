@@ -65,13 +65,25 @@ guessing a decomposition.
 Every parameter must carry a `p1_conversion_selfcheck_note` (see Pitfall P1 self-check)
 and you must list which of C1–C6 you explicitly checked in `calibration_rules_applied`.
 
+### Overheads and Margin — NOT calc_lines
+
+Do not write `CalcLine`s for the Overheads or Margin buckets. Their formula is fixed by
+the 5-bucket structure and never varies by process: Overheads = rate% x Manufacturing
+Costs; Margin = rate% x (Manufacturing Costs + Packaging & Logistics + Overheads). You
+only propose the rate **parameter** for each (an ordinary `ParameterEstimate` in the
+Overheads/Margin bucket of `parameters`, e.g. "Overheads rate on mfg costs", unit `%`),
+then point `overhead_rate_param_number` / `margin_rate_param_number` at their numbers —
+code builds the correct line automatically. `calc_lines` must contain **only** Material,
+Conversion, and Packaging & Logistics.
+
 ### Calculation lines (`calc_lines`)
 
-For each bucket, also provide the Calculation-tab line items that turn your parameters
-into that bucket's €/unit cost, matching `references/output_format_spec.md`'s Calculation
-tab exactly (one `CalcLine` per M/C/P/O/S row). Give each line an `id_code` following the
-legacy script's own convention — `M1, M2, M3...` for Material, `C1, C2...` for Conversion,
-`P1, P2...` for Packaging & Logistics, `O1...` for Overheads, `S1` for Margin — **every
+For Material, Conversion, and Packaging & Logistics, provide the Calculation-tab line
+items that turn your parameters into that bucket's €/unit cost, matching
+`references/output_format_spec.md`'s Calculation tab exactly (one `CalcLine` per M/C/P
+row). Give each line an `id_code` following the legacy script's own convention — `M1,
+M2, M3...` for Material, `C1, C2...` for Conversion, `P1, P2...` for Packaging &
+Logistics — **every
 id_code must be unique across your entire response**, the same discipline as parameter
 numbers.
 

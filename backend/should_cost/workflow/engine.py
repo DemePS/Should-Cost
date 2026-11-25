@@ -22,7 +22,6 @@ from should_cost.excel.recalc import recalc_and_check
 from should_cost.excel.slide_values import build_slide_values_excel
 from should_cost.models.common import SupplierRow
 from should_cost.models.job import (
-    ChatBlocks,
     DiscoveryDocument,
     GeneratedFile,
     Job,

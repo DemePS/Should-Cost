@@ -62,11 +62,15 @@ def make_pre_build_reasoning(**overrides) -> PreBuildReasoning:
             ProcessAlternative(process="casting", why_not_chosen="not applicable to fasteners"),
         ],
         process_confidence=Confidence.MEDIUM,
-        dominant_bucket=CostDriverHypothesis(bucket=Bucket.CONVERSION, expected_share_pct=45, reasoning="cold heading dominates"),
-        second_bucket=CostDriverHypothesis(bucket=Bucket.MATERIAL, expected_share_pct=30, reasoning="steel wire rod"),
-        smallest_bucket=CostDriverHypothesis(bucket=Bucket.PACKAGING_LOGISTICS, expected_share_pct=3, reasoning="small, light part"),
-        plausible_sc_low=0.02,
-        plausible_sc_high=0.045,
+        # Matches what make_proposed_parameters() actually computes (should_cost ~0.0103
+        # EUR/unit: Material 56.9%, Packaging & Logistics 19.5%, Conversion 5.4%) — kept
+        # in sync by hand; test_sanity_gate.py::test_green_within_everything is what
+        # would catch the two drifting apart.
+        dominant_bucket=CostDriverHypothesis(bucket=Bucket.MATERIAL, expected_share_pct=57, reasoning="steel wire rod dominates at this volume"),
+        second_bucket=CostDriverHypothesis(bucket=Bucket.PACKAGING_LOGISTICS, expected_share_pct=20, reasoning="small, light part but fixed packaging floor"),
+        smallest_bucket=CostDriverHypothesis(bucket=Bucket.CONVERSION, expected_share_pct=5, reasoning="high-throughput cold heading, negligible per-part time"),
+        plausible_sc_low=0.008,
+        plausible_sc_high=0.013,
         rationale="DE manufacturer, high volume fastener",
         critical_assumptions=[],
         open_questions=[],
@@ -113,15 +117,9 @@ def make_proposed_parameters(**overrides) -> ProposedParameters:
                 CalcLine(id_code="P1", label="Packaging & freight", unit="EUR/unit", kind="ref",
                          param_refs=[5], contributes_to_bucket_total=True),
             ],
-            Bucket.OVERHEADS: [
-                CalcLine(id_code="O1", label="Overheads", unit="EUR/unit", kind="expr",
-                         param_refs=[6], expr_template="0.03*{p6}", contributes_to_bucket_total=True),
-            ],
-            Bucket.MARGIN: [
-                CalcLine(id_code="S1", label="Margin", unit="EUR/unit", kind="expr",
-                         param_refs=[7], expr_template="0.03*{p7}", contributes_to_bucket_total=True),
-            ],
         },
+        overhead_rate_param_number=6,
+        margin_rate_param_number=7,
         p1_conversion_selfcheck_note="Machine-only rate; labor/energy separate.",
         calibration_rules_applied=["C1: cavities n/a (cold heading)", "C6: machine rate is machine-only", "P1: DE regional rate used"],
     )

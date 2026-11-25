@@ -29,6 +29,13 @@ class AssemblyType(str, Enum):
     SUB_ASSEMBLY = "sub_assembly"
 
 
+# ProposedParameters.calc_lines covers only these three — Overheads and Margin are always
+# "rate% x running subtotal" (never process-specific) and are built automatically by
+# excel/build.py / excel/formula_eval.py from overhead_rate_param_number /
+# margin_rate_param_number instead. See ProposedParameters's own docstring.
+CALC_LINE_BUCKETS = {Bucket.MATERIAL, Bucket.CONVERSION, Bucket.PACKAGING_LOGISTICS}
+
+
 class BomLine(BaseModel):
     """Step SA-1 — one row of a sub-assembly BOM."""
 
@@ -206,7 +213,20 @@ class ProposedParameters(BaseModel):
     process: str
     parameters: dict[Bucket, list[ParameterEstimate]]
     calc_lines: dict[Bucket, list[CalcLine]] = Field(
-        description="Step 4 Calculation-tab line items per bucket, in display order."
+        description="Step 4 Calculation-tab line items for Material, Conversion and "
+        "Packaging & Logistics only (in display order) — Overheads and Margin are NOT "
+        "included here; see overhead_rate_param_number / margin_rate_param_number below."
+    )
+    overhead_rate_param_number: int = Field(
+        description="Parameter number of the Overheads rate (%) parameter. Overheads is "
+        "ALWAYS 'rate% x Manufacturing Costs' per the fixed 5-bucket structure — this is "
+        "never process-specific, so code builds that line automatically from this one "
+        "parameter rather than you writing a CalcLine for it."
+    )
+    margin_rate_param_number: int = Field(
+        description="Parameter number of the Margin rate (%) parameter. Margin is ALWAYS "
+        "'rate% x (Manufacturing Costs + Packaging & Logistics + Overheads)' per the fixed "
+        "5-bucket structure — code builds this line automatically from this one parameter."
     )
     p1_conversion_selfcheck_note: str = Field(
         description="SKILL.md Pitfall P1 self-check: implied all-in Conversion cost vs. "
@@ -222,14 +242,25 @@ class ProposedParameters(BaseModel):
         missing = set(Bucket) - set(self.parameters)
         if missing:
             raise ValueError(f"ProposedParameters missing buckets: {sorted(b.value for b in missing)}")
-        missing_calc = set(Bucket) - set(self.calc_lines)
+        missing_calc = CALC_LINE_BUCKETS - set(self.calc_lines)
         if missing_calc:
             raise ValueError(f"ProposedParameters missing calc_lines for buckets: {sorted(b.value for b in missing_calc)}")
+        extra_calc = set(self.calc_lines) - CALC_LINE_BUCKETS
+        if extra_calc:
+            raise ValueError(
+                f"ProposedParameters.calc_lines must not include {sorted(b.value for b in extra_calc)} — "
+                "Overheads/Margin are built automatically from overhead_rate_param_number/margin_rate_param_number."
+            )
 
         all_numbers = [p.number for params in self.parameters.values() for p in params]
         if len(all_numbers) != len(set(all_numbers)):
             raise ValueError(f"ParameterEstimate.number must be unique across all buckets, got: {all_numbers}")
         valid_numbers = set(all_numbers)
+
+        for field_name in ("overhead_rate_param_number", "margin_rate_param_number"):
+            number = getattr(self, field_name)
+            if number not in valid_numbers:
+                raise ValueError(f"ProposedParameters.{field_name}={number} is not a known parameter number")
 
         all_id_codes = [line.id_code for lines in self.calc_lines.values() for line in lines]
         if len(all_id_codes) != len(set(all_id_codes)):

@@ -166,8 +166,18 @@ def _build_calculations(
     calc_items.append(("_SUBTOTAL_B", "Manufacturing Costs", "€/unit", ""))
     calc_items.append("_BLANK")
     add_bucket(Bucket.PACKAGING_LOGISTICS, with_sigma=True)
-    add_bucket(Bucket.OVERHEADS, with_sigma=False)
-    add_bucket(Bucket.MARGIN, with_sigma=False)
+
+    # Overheads and Margin are NOT model-authored calc_lines (see ProposedParameters'
+    # docstring) — their formula is fixed by the skill's 5-bucket structure, never
+    # process-specific, so code builds the single O1/S1 line directly: Overheads =
+    # rate% x Manufacturing Costs; Margin = rate% x (Manufacturing Costs + P&L + Overheads).
+    calc_items.append(_BUCKET_SECTION_LABEL[Bucket.OVERHEADS])
+    calc_items.append(("O1", "Overheads (rate % x Manufacturing Costs)", "€/unit", ""))
+    calc_items.append("_BLANK")
+    calc_items.append(_BUCKET_SECTION_LABEL[Bucket.MARGIN])
+    calc_items.append(("S1", "Margin (rate % x (Manufacturing Costs + P&L + Overheads))", "€/unit", ""))
+    calc_items.append("_BLANK")
+
     calc_items.append(("_SUBTOTAL_B", "SHOULD COST", "€/unit", ""))
     calc_items.append(("_SIGMA_B", "Σ CURRENT PRICE", "€/unit", ""))
     calc_items.append(("_SIGMA_B", "Impact Potential", "€/unit", ""))
@@ -189,10 +199,10 @@ def _build_calculations(
     material_ids = contributing_ids(Bucket.MATERIAL)
     conversion_ids = contributing_ids(Bucket.CONVERSION)
     pl_ids = contributing_ids(Bucket.PACKAGING_LOGISTICS)
-    overheads_ids = contributing_ids(Bucket.OVERHEADS)
-    margin_ids = contributing_ids(Bucket.MARGIN)
 
     sigma_formula = lambda ids: "=" + "+".join(calc_ref(i) for i in ids)  # noqa: E731
+    overhead_rate_row = input_row_map[proposed.overhead_rate_param_number]
+    margin_rate_row = input_row_map[proposed.margin_rate_param_number]
 
     resolved: list = []
     for item in calc_items:
@@ -209,15 +219,23 @@ def _build_calculations(
             resolved.append((item[0], item[1], item[2], sigma_formula(source_ids)))
         elif isinstance(item, tuple) and item[0] == "_SUBTOTAL_B" and item[1] == "Manufacturing Costs":
             resolved.append((item[0], item[1], item[2], f"={calc_ref(_BUCKET_SIGMA_LABEL[Bucket.MATERIAL])}+{calc_ref(_BUCKET_SIGMA_LABEL[Bucket.CONVERSION])}"))
+        elif isinstance(item, tuple) and item[0] == "O1":
+            resolved.append((item[0], item[1], item[2], f"={calc_ref('Manufacturing Costs')}*'2. Inputs'!F{overhead_rate_row}/100"))
+        elif isinstance(item, tuple) and item[0] == "S1":
+            resolved.append(
+                (
+                    item[0], item[1], item[2],
+                    f"=({calc_ref('Manufacturing Costs')}+{calc_ref(_BUCKET_SIGMA_LABEL[Bucket.PACKAGING_LOGISTICS])}+{calc_ref('O1')})"
+                    f"*'2. Inputs'!F{margin_rate_row}/100",
+                )
+            )
         elif isinstance(item, tuple) and item[0] == "_SUBTOTAL_B" and item[1] == "SHOULD COST":
-            overheads_sum = "+".join(calc_ref(i) for i in overheads_ids) if overheads_ids else "0"
-            margin_sum = "+".join(calc_ref(i) for i in margin_ids) if margin_ids else "0"
             resolved.append(
                 (
                     item[0],
                     item[1],
                     item[2],
-                    f"={calc_ref('Manufacturing Costs')}+{calc_ref(_BUCKET_SIGMA_LABEL[Bucket.PACKAGING_LOGISTICS])}+{overheads_sum}+{margin_sum}",
+                    f"={calc_ref('Manufacturing Costs')}+{calc_ref(_BUCKET_SIGMA_LABEL[Bucket.PACKAGING_LOGISTICS])}+{calc_ref('O1')}+{calc_ref('S1')}",
                 )
             )
         elif isinstance(item, tuple) and item[0] == "_SIGMA_B" and item[1] == "Σ CURRENT PRICE":

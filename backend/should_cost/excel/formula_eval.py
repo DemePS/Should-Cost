@@ -99,8 +99,13 @@ def compute_cost_build(proposed: ProposedParameters, param_values: dict[int, flo
     conversion = bucket_total(Bucket.CONVERSION)
     manufacturing_costs = material + conversion
     packaging_logistics = bucket_total(Bucket.PACKAGING_LOGISTICS)
-    overheads = bucket_total(Bucket.OVERHEADS)
-    margin = bucket_total(Bucket.MARGIN)
+    # Overheads/Margin are always "rate% x running subtotal" (see CALC_LINE_BUCKETS'
+    # docstring) — computed directly here, mirroring excel/build.py's O1/S1 formulas,
+    # not via proposed.calc_lines (which no longer includes these two buckets).
+    overhead_rate_pct = param_values[proposed.overhead_rate_param_number]
+    overheads = manufacturing_costs * overhead_rate_pct / 100
+    margin_rate_pct = param_values[proposed.margin_rate_param_number]
+    margin = (manufacturing_costs + packaging_logistics + overheads) * margin_rate_pct / 100
     should_cost = manufacturing_costs + packaging_logistics + overheads + margin
 
     return {

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from pathlib import Path
 
 from azure.core.credentials_async import AsyncTokenCredential
 from fastapi import APIRouter, Depends, HTTPException, Request
