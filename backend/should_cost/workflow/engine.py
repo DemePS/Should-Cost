@@ -69,7 +69,19 @@ async def _persist(store: JobStateStore, job: Job) -> None:
     await store.save(job)
 
 
-async def run_job(job: Job, *, store: JobStateStore, settings: Settings, credential: AsyncTokenCredential) -> None:
+async def run_job(
+    job: Job,
+    *,
+    store: JobStateStore,
+    settings: Settings,
+    credential: AsyncTokenCredential,
+    skip_upload: bool = False,
+) -> None:
+    """``skip_upload=True`` is for should_cost/cli.py's local runner only — it leaves
+    Step 7's generated files on local disk (still builds the cross-supplier table) and
+    never calls Graph, so a local run genuinely never needs a SharePoint site. The API
+    path (should_cost/routes/jobs.py) never passes this — production jobs always upload.
+    """
     job.status = JobStatus.RUNNING
     job.step_started_at = dt.datetime.now(dt.timezone.utc)
     await _persist(store, job)
@@ -91,7 +103,10 @@ async def run_job(job: Job, *, store: JobStateStore, settings: Settings, credent
                 await _persist(store, job)
 
         job.current_step = WorkflowStep.STEP_7_HANDOFF
-        await _run_handoff(job, credential, settings)
+        if skip_upload:
+            job.cross_supplier_table = build_cross_supplier_table(job.units)
+        else:
+            await _run_handoff(job, credential, settings)
 
         job.status = JobStatus.DONE
         job.current_step = WorkflowStep.DONE
@@ -111,7 +126,13 @@ async def run_job(job: Job, *, store: JobStateStore, settings: Settings, credent
 
 
 async def answer_job(
-    job: Job, answer_text: str, *, store: JobStateStore, settings: Settings, credential: AsyncTokenCredential
+    job: Job,
+    answer_text: str,
+    *,
+    store: JobStateStore,
+    settings: Settings,
+    credential: AsyncTokenCredential,
+    skip_upload: bool = False,
 ) -> None:
     """POST /api/jobs/{id}/answer — applies a free-text answer to the current pending
     question and resumes. What the answer *means* depends on the pause reason:
@@ -151,7 +172,7 @@ async def answer_job(
     # which _process_unit re-reads from job state, not re-downloaded from SharePoint.
     job.pending_question = None
     job.status = JobStatus.RUNNING
-    await run_job(job, store=store, settings=settings, credential=credential)
+    await run_job(job, store=store, settings=settings, credential=credential, skip_upload=skip_upload)
 
 
 async def _run_step0(job: Job, credential: AsyncTokenCredential, settings: Settings, store: JobStateStore) -> None:
