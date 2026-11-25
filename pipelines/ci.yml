@@ -1,0 +1,147 @@
+# CI — runs on every pull request and on main. Path filters mean a change to only one
+# area (e.g. frontend/) does not re-run the unrelated jobs, per the task brief.
+#
+# Registering this pipeline in Azure DevOps and authorizing its service connection are
+# one-time setup steps — see docs/deployment.md.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - backend/*
+      - frontend/*
+      - infra/*
+      - skill/*
+      - Dockerfile
+      - pipelines/ci.yml
+
+pr:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - backend/*
+      - frontend/*
+      - infra/*
+      - skill/*
+      - Dockerfile
+      - pipelines/ci.yml
+
+variables:
+  - template: variables.yml
+
+stages:
+  - stage: SecretScan
+    displayName: Secret scan
+    jobs:
+      - job: SecretScan
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - checkout: self
+            fetchDepth: 0
+          # Fails the build on anything that looks like a committed secret (API key,
+          # token, private key block) — per the task brief's "pipeline step that fails
+          # the build if a secret-looking value is committed."
+          - bash: |
+              set -euo pipefail
+              PATTERN='(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[0-9A-Za-z-]{10,}|sk-[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{35})'
+              if git grep -I -n -E "$PATTERN" -- . ':!pipelines/ci.yml'; then
+                echo "##vso[task.logissue type=error]A committed value looks like a secret — see matches above."
+                exit 1
+              fi
+              echo "No secret-looking values found."
+            displayName: Scan for committed secrets
+
+  - stage: Backend
+    displayName: Backend (Python / uv)
+    dependsOn: []
+    jobs:
+      - job: BackendTest
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - bash: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo "##vso[task.prependpath]$HOME/.local/bin"
+            displayName: Install uv
+          - bash: uv sync --frozen --extra dev
+            workingDirectory: backend
+            displayName: Install backend dependencies (uv sync --frozen)
+          - bash: uv run ruff check .
+            workingDirectory: backend
+            displayName: ruff
+          - bash: uv run mypy should_cost
+            workingDirectory: backend
+            displayName: mypy
+          - bash: uv run pytest --junitxml=test-results.xml
+            workingDirectory: backend
+            displayName: pytest
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: 'backend/test-results.xml'
+              testRunTitle: 'Backend pytest'
+
+  - stage: Frontend
+    displayName: Frontend (Vite / pnpm)
+    dependsOn: []
+    jobs:
+      - job: FrontendTest
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '22.x'
+          - bash: corepack enable && corepack prepare pnpm@10 --activate
+            displayName: Enable pnpm
+          - bash: pnpm install --frozen-lockfile
+            workingDirectory: frontend
+            displayName: pnpm install
+          - bash: pnpm lint
+            workingDirectory: frontend
+            displayName: lint
+          - bash: pnpm typecheck
+            workingDirectory: frontend
+            displayName: typecheck
+          - bash: pnpm test
+            workingDirectory: frontend
+            displayName: vitest
+          - bash: pnpm build
+            workingDirectory: frontend
+            displayName: build
+
+  - stage: Infra
+    displayName: Infra (Bicep)
+    dependsOn: []
+    jobs:
+      - job: BicepValidate
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - bash: az bicep build --file infra/main.bicep --stdout > /dev/null
+            displayName: az bicep build
+          - task: AzureCLI@2
+            displayName: az deployment group what-if (dev parameters, validation only)
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az deployment group what-if \
+                  --resource-group $(resourceGroupDev) \
+                  --template-file infra/main.bicep \
+                  --parameters infra/parameters/dev.json
+
+  - stage: DockerBuild
+    displayName: Docker build (no push on PRs)
+    dependsOn: [Backend, Frontend]
+    jobs:
+      - job: DockerBuild
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - bash: docker build -t should-cost:ci-$(Build.BuildId) .
+            displayName: docker build

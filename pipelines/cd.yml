@@ -1,0 +1,124 @@
+# CD — on main. Builds the image once, pushes it to the existing Azure Container
+# Registry, then deploys it to the single Azure App Service across dev -> test -> prod,
+# via the staging slot, with a manual approval gate on prod (configured on the
+# should-cost-prod Azure DevOps Environment — see docs/deployment.md).
+#
+# Deploy sequence per environment (see the DeployToEnvironment template below):
+#   1. Push the appsettings for this environment's variable group onto the *staging*
+#      slot only (secret variables stay masked in logs; some are marked slot-specific
+#      per docs/deployment.md, meaning the slot keeps its own value across a swap).
+#   2. Point the staging slot at the new image tag; wait for it to come up.
+#   3. Smoke test the staging slot (GET /api/health, then a GET / that must return the
+#      built frontend, not a 404) — this is the gate before anything reaches production.
+#   4. Swap staging <-> production.
+#   5. Smoke test production itself, now serving the new code, as a final check.
+#   6. If step 5 fails, swap back (swap is its own inverse) — the previous build is live
+#      again within the time the swap takes, no redeploy needed.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - backend/*
+      - frontend/*
+      - skill/*
+      - Dockerfile
+      - pipelines/cd.yml
+
+variables:
+  - template: variables.yml
+  - name: imageTag
+    value: $(Build.BuildId)
+
+stages:
+  - stage: Build
+    displayName: Build and push image
+    jobs:
+      - job: BuildPush
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Docker@2
+            displayName: Build and push to ACR
+            inputs:
+              containerRegistry: $(acrServiceConnection)
+              repository: $(imageRepository)
+              command: buildAndPush
+              Dockerfile: Dockerfile
+              tags: |
+                $(imageTag)
+                latest
+
+  - stage: DeployDev
+    displayName: Deploy to dev
+    dependsOn: Build
+    jobs:
+      - deployment: DeployDev
+        environment: $(environmentNameDev)
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          - group: $(variableGroupDev)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/deploy-slot.yml
+                  parameters:
+                    azureServiceConnection: $(azureServiceConnection)
+                    resourceGroup: $(resourceGroupDev)
+                    appServiceName: $(appServiceNameDev)
+                    containerRegistry: $(containerRegistry)
+                    imageRepository: $(imageRepository)
+                    imageTag: $(imageTag)
+
+  - stage: DeployTest
+    displayName: Deploy to test
+    dependsOn: DeployDev
+    jobs:
+      - deployment: DeployTest
+        environment: $(environmentNameTest)
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          - group: $(variableGroupTest)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/deploy-slot.yml
+                  parameters:
+                    azureServiceConnection: $(azureServiceConnection)
+                    resourceGroup: $(resourceGroupTest)
+                    appServiceName: $(appServiceNameTest)
+                    containerRegistry: $(containerRegistry)
+                    imageRepository: $(imageRepository)
+                    imageTag: $(imageTag)
+
+  - stage: DeployProd
+    displayName: Deploy to prod
+    dependsOn: DeployTest
+    jobs:
+      # The should-cost-prod Environment has a manual approval check configured on it
+      # in Azure DevOps (Pipelines > Environments > should-cost-prod > Approvals and
+      # checks) — see docs/deployment.md. This deployment job pauses for that approval
+      # before running; nothing here grants it.
+      - deployment: DeployProd
+        environment: $(environmentNameProd)
+        pool:
+          vmImage: ubuntu-latest
+        variables:
+          - group: $(variableGroupProd)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: templates/deploy-slot.yml
+                  parameters:
+                    azureServiceConnection: $(azureServiceConnection)
+                    resourceGroup: $(resourceGroupProd)
+                    appServiceName: $(appServiceNameProd)
+                    containerRegistry: $(containerRegistry)
+                    imageRepository: $(imageRepository)
+                    imageTag: $(imageTag)

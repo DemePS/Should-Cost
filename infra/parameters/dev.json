@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "appServiceName": { "value": "__APP_SERVICE_NAME_DEV__" },
+    "appServiceResourceGroup": { "value": "__APP_SERVICE_RESOURCE_GROUP_DEV__" },
+    "environmentName": { "value": "dev" },
+    "location": { "value": "__LOCATION__" },
+    "allowedIpRanges": { "value": ["__HAGER_NETWORK_CIDR__"] },
+    "jobRetentionDays": { "value": 30 }
+  }
+}

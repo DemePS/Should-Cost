@@ -1,0 +1,41 @@
+# All Azure DevOps / Azure placeholders used by ci.yml, cd.yml and infra.yml, in one
+# place, per the task brief ("so they can be filled in once"). Fill in every __PLACEHOLDER__
+# below, either here (if not secret) or as a secret variable in the matching Azure DevOps
+# variable group (see docs/deployment.md for the one-time setup steps and which ones are
+# secret). Pipelines reference only these names — never a literal resource/service-connection
+# name anywhere else.
+
+variables:
+  # ── Service connections (Project Settings > Service connections) ───────────────────
+  azureServiceConnection: '__AZURE_SERVICE_CONNECTION_NAME__' # ARM service connection, one per environment or one shared with scoped roles — see docs/deployment.md
+  acrServiceConnection: '__ACR_SERVICE_CONNECTION_NAME__'     # Docker Registry service connection to the container registry below
+
+  # ── Container registry (existing — never created by this repo) ─────────────────────
+  containerRegistry: '__CONTAINER_REGISTRY_LOGIN_SERVER__'   # e.g. myregistry.azurecr.io
+  imageRepository: 'should-cost'
+
+  # ── Resource groups / App Service names per environment (all existing — see
+  #    docs/deployment.md's request checklist; this repo never creates them) ───────────
+  resourceGroupDev: '__RESOURCE_GROUP_DEV__'
+  resourceGroupTest: '__RESOURCE_GROUP_TEST__'
+  resourceGroupProd: '__RESOURCE_GROUP_PROD__'
+  appServiceNameDev: '__APP_SERVICE_NAME_DEV__'
+  appServiceNameTest: '__APP_SERVICE_NAME_TEST__'
+  appServiceNameProd: '__APP_SERVICE_NAME_PROD__'
+
+  # ── Variable groups (Pipelines > Library) — linked per-environment in cd.yml,
+  #    hold the secret app settings (search provider key, local-dev-only client secret,
+  #    Foundry API key fallback) as Azure DevOps secret variables, never in this file ──
+  variableGroupDev: '__VARIABLE_GROUP_NAME_DEV__'
+  variableGroupTest: '__VARIABLE_GROUP_NAME_TEST__'
+  variableGroupProd: '__VARIABLE_GROUP_NAME_PROD__'
+
+  # ── Azure DevOps Environments (Pipelines > Environments) — prod has the manual
+  #    approval check configured on it, per docs/deployment.md ───────────────────────
+  environmentNameDev: 'should-cost-dev'
+  environmentNameTest: 'should-cost-test'
+  environmentNameProd: 'should-cost-prod'
+
+  # ── Subscription / location (for infra.yml's Bicep deployment only) ─────────────────
+  azureSubscriptionId: '__AZURE_SUBSCRIPTION_ID__'
+  location: '__AZURE_REGION__' # e.g. westeurope
