@@ -20,7 +20,7 @@ class GraphCredentialKind(str, Enum):
 
 
 class FoundryCredentialKind(str, Enum):
-    MANAGED_IDENTITY = "managed_identity"
+    DEFAULT = "default"
     API_KEY = "api_key"
 
 
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     azure_ai_foundry_endpoint: str
     model_deployment: str
     azure_ai_foundry_api_version: str = "2024-10-21"
-    azure_ai_foundry_credential: FoundryCredentialKind = FoundryCredentialKind.MANAGED_IDENTITY
+    azure_ai_foundry_credential: FoundryCredentialKind = FoundryCredentialKind.DEFAULT
     azure_ai_foundry_api_key: str | None = None
 
     # ── Research agent ────────────────────────────────────────────────────

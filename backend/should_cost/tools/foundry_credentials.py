@@ -25,8 +25,10 @@ from azure.core.credentials_async import AsyncTokenCredential
 
 from should_cost.config import FoundryCredentialKind, Settings
 
-# Managed identity should use role "Cognitive Services User" on the Foundry resource —
-# see docs/deployment.md for the role assignment.
+# The default path (DefaultAzureCredential) should use role "Cognitive Services User" on
+# the Foundry resource for the managed identity it resolves to in Azure — see
+# docs/deployment.md for the role assignment. On localhost it resolves to the developer's
+# own ``az login`` session instead, with no extra configuration needed.
 _FAR_FUTURE_EXPIRY_SECONDS = 10 * 365 * 24 * 3600
 
 
@@ -46,10 +48,16 @@ class _StaticKeyCredential(AsyncTokenCredential):
 
 
 def build_foundry_credential(settings: Settings) -> AsyncTokenCredential:
+    """``default`` (the default): ``DefaultAzureCredential`` — resolves to the App
+    Service's system-assigned managed identity once deployed, and to the developer's own
+    ``az login`` session (``AzureCliCredential``) on localhost, with no extra
+    configuration needed either way. ``api_key`` remains available as an explicit
+    fallback (see module docstring for its caveats).
+    """
     if settings.azure_ai_foundry_credential == FoundryCredentialKind.API_KEY:
         assert settings.azure_ai_foundry_api_key
         return _StaticKeyCredential(settings.azure_ai_foundry_api_key)
 
-    from azure.identity.aio import ManagedIdentityCredential
+    from azure.identity.aio import DefaultAzureCredential
 
-    return ManagedIdentityCredential(client_id=settings.azure_client_id)
+    return DefaultAzureCredential(managed_identity_client_id=settings.azure_client_id)

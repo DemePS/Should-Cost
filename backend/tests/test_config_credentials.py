@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from azure.identity.aio import ClientSecretCredential, ManagedIdentityCredential
+from azure.identity.aio import ClientSecretCredential, DefaultAzureCredential, ManagedIdentityCredential
 
 from should_cost.config import FoundryCredentialKind, GraphCredentialKind, Settings, get_settings
 from should_cost.graph.credentials import build_graph_credential
@@ -60,11 +60,11 @@ def test_graph_credential_client_secret_builds_when_complete() -> None:
     assert isinstance(credential, ClientSecretCredential)
 
 
-def test_foundry_credential_defaults_to_managed_identity() -> None:
+def test_foundry_credential_defaults_to_default_azure_credential() -> None:
     settings = _settings()
-    assert settings.azure_ai_foundry_credential == FoundryCredentialKind.MANAGED_IDENTITY
+    assert settings.azure_ai_foundry_credential == FoundryCredentialKind.DEFAULT
     credential = build_foundry_credential(settings)
-    assert isinstance(credential, ManagedIdentityCredential)
+    assert isinstance(credential, DefaultAzureCredential)
 
 
 def test_foundry_credential_api_key_requires_key() -> None:
