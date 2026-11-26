@@ -279,14 +279,18 @@ async def propose_parameters(
         "Produce the full Step 2 parameter proposal now."
     )
     wire_format = _wire_response_format(ProposedParameters, settings)
-    agent = Agent(
-        client=client,
-        instructions=instructions,
-        tools=PROCESS_FORMULA_TOOLS,
-        name="should_cost",
-    )
 
     async def _call() -> Any:
+        # A fresh Agent per attempt, not one built outside and reused: Agent.__aexit__
+        # closes its underlying HTTP client, so a second `async with agent:` on the same
+        # instance fails outright ("client has been closed") — confirmed live, this is
+        # exactly what a retry on a shared Agent object hit.
+        agent = Agent(
+            client=client,
+            instructions=instructions,
+            tools=PROCESS_FORMULA_TOOLS,
+            name="should_cost",
+        )
         async with agent:
             response = await agent.run(user_text, options=_local_tool_call_options(settings, wire_format))
         if isinstance(wire_format, dict):
