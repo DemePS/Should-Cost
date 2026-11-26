@@ -42,10 +42,22 @@ scope. None of the three weight-derivation tiers apply (there is no discrete par
 bound), and that is not a gap — it is the correct reading of the UoM column. In that case
 set `weight` to 1 unit of the PPE Unit of Measure (e.g. 1 kg → `grams_per_part: 1000`),
 `tier` reflecting that this is definitional rather than derived, and do not add it to
-`missing_info`. Genuinely unresolved composition details (e.g. an unstated plating split
-on a clad/plated strip) still get a low-confidence note in the relevant field (or, if
-nothing else fits, `missing_info` — but only the specific unresolved composition
-question, phrased so Step 2/3 can act on it, not "no weight is available").
+`missing_info`.
+
+**What actually belongs in `missing_info` vs. a low-confidence assumption:** `missing_info`
+non-empty **pauses the entire job and waits for a human** — it is not a place to log every
+open question. Reserve it strictly for gaps where no reasonable estimate exists at all
+(no material grade of any kind, no weight basis, no identifiable process or component
+identity — something a human genuinely has to supply before any number can be built at
+all). Everything else — a plating/clad composition split, an exact alloy sub-grade, a
+coating process detail, a dimensional tolerance nuance, which of several template
+checkboxes applies — gets a stated, explicit, low-confidence assumption (reasonable given
+the document's own hints, e.g. a title block or standard reference) recorded inline in
+whichever field it belongs to (append "(assumed: ...)" to `material_grade`,
+`surface_finish`, or a `manufacturing_process_clues` entry, as fits). State the assumption
+and move on — do not add it to `missing_info` as an alternative to stating it. A later
+step (research, sanity gate) or a human reviewing the finished model can still challenge a
+stated assumption; a job stuck in `missing_info` never reaches that model at all.
 
 ### Sub-Assembly Detection Protocol (mandatory when multiple drawings are present)
 

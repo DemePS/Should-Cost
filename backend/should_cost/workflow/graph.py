@@ -47,7 +47,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from azure.core.credentials_async import AsyncTokenCredential
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -57,16 +56,7 @@ from should_cost.config import Settings
 from should_cost.excel.build import build_calc_model_excel
 from should_cost.excel.recalc import recalc_and_check
 from should_cost.excel.slide_values import build_slide_values_excel
-from should_cost.models.common import (
-    Bucket,
-    Confidence,
-    MatchType,
-    SanityStatus,
-    SpendLookupResult,
-    SupplierRow,
-    SupplierType,
-    WeightTier,
-)
+from should_cost.models.common import MatchType, SpendLookupResult, SupplierRow, SupplierType
 from should_cost.models.job import (
     DiscoveryDocument,
     GeneratedFile,
@@ -79,7 +69,6 @@ from should_cost.models.job import (
     StepEventStatus,
     WorkflowStep,
 )
-from should_cost.models.workflow import AssemblyType
 from should_cost.state.store import JobStateStore
 from should_cost.tools import model_client
 from should_cost.tools.research_agent import run_research
@@ -104,23 +93,20 @@ from should_cost.workflow.steps.sensitivity import compute_sensitivity
 # inputs) or must be marked failed (Step 7's external upload is not).
 NON_RESUMABLE_STEPS = {WorkflowStep.STEP_7_HANDOFF}
 
-# LangGraph's msgpack checkpoint serializer warns-then-will-block deserializing enum
-# types it doesn't recognize by module+name (confirmed live) — every str-Enum that can
-# end up nested inside a Job (common.py + job.py + workflow.py) needs declaring once,
-# here, rather than at every checkpointer construction site.
-_ALLOWED_MSGPACK_TYPES = [
-    JobStatus,
-    WorkflowStep,
-    NeedsInputReason,
-    StepEventStatus,
-    Confidence,
-    WeightTier,
-    Bucket,
-    SanityStatus,
-    SupplierType,
-    MatchType,
-    AssemblyType,
-]
+# LangGraph's msgpack checkpoint serializer (JsonPlusSerializer) warns, but still
+# deserializes, any custom type it doesn't recognize by module+name *unless* it's given
+# an explicit allowed_msgpack_modules list — in which case it switches to blocking
+# (returning nothing / corrupting the field) anything not in that list. Confirmed live,
+# the hard way: an earlier version of this file passed an explicit list containing only
+# the str-Enums (JobStatus, WorkflowStep, ...) and not the many nested Pydantic
+# BaseModels Job also carries (PendingQuestion, JobUnit, SpendLookupResult,
+# DiscoveryDocument, PartFacts, ProposedParameters, ...) — every one of those got
+# silently blocked on checkpoint reload, corrupting state across every resume. Given how
+# large and easy to under-enumerate that set is, the checkpointer is left on its
+# documented-safe default (warn, don't block) by not overriding serde at all, rather
+# than risk the same mistake again; a stricter allowlist is a real future-langgraph-
+# version follow-up (see LANGGRAPH_STRICT_MSGPACK in langgraph's own source), not done
+# here.
 
 
 @dataclass
@@ -715,7 +701,6 @@ async def run_job(
     )
     try:
         async with AsyncSqliteSaver.from_conn_string(settings.langgraph_checkpoint_db_path) as checkpointer:
-            checkpointer.serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
             compiled: CompiledStateGraph[Job, GraphContext, Job, Job] = build_graph().compile(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": job.job_id}}
             # langgraph's own ainvoke() overload stubs declare context: None on every
@@ -750,7 +735,6 @@ async def answer_job(
     )
     try:
         async with AsyncSqliteSaver.from_conn_string(settings.langgraph_checkpoint_db_path) as checkpointer:
-            checkpointer.serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
             compiled: CompiledStateGraph[Job, GraphContext, Job, Job] = build_graph().compile(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": job.job_id}}
             result = await compiled.ainvoke(  # type: ignore[call-overload]
