@@ -8,7 +8,7 @@
 
 Reads the PPE spreadsheet and the material-folder documents from local disk instead of
 Microsoft Graph, builds the Job/JobUnits directly (bypassing Step 0's Graph calls), and
-drives the real workflow/engine.py orchestrator with ``skip_upload=True`` — Step 7 never
+drives the real workflow/graph.py LangGraph orchestrator with ``skip_upload=True`` — Step 7 never
 calls Graph; the generated Excel files are copied into --output-dir instead of uploaded.
 
 Still talks to Azure AI Foundry for the three structured calls and the research agent's
@@ -36,7 +36,7 @@ from should_cost.models.common import MatchType, SpendLookupResult, SupplierRow,
 from should_cost.models.job import DiscoveryDocument, Job, JobStatus, JobUnit
 from should_cost.state.store import InMemoryJobStateStore
 from should_cost.tools.foundry_credentials import build_foundry_credential
-from should_cost.workflow.engine import answer_job, run_job
+from should_cost.workflow.graph import answer_job, run_job
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

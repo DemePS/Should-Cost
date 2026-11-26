@@ -1,22 +1,29 @@
 """Job pause/resume: the full queued -> needs_input -> answer -> running -> done path
-through the real workflow/engine.py orchestrator, with every model/Excel-layer function
-stubbed (this file tests the state machine, not the business logic those layers already
-have their own tests for).
+through the real LangGraph orchestrator (should_cost/workflow/graph.py), with every
+model/Excel-layer function stubbed (this file tests the state machine, not the business
+logic those layers already have their own tests for).
 """
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from should_cost.models.common import Bucket, Confidence, SanityStatus
+from should_cost.models.common import Bucket, SanityStatus
 from should_cost.models.job import Job, JobStatus, NeedsInputReason
-from should_cost.models.workflow import AssemblyType, BucketShareCheck, CalibrationCheck, Insights, PartFacts, SanityGateResult
+from should_cost.models.workflow import (
+    AssemblyType,
+    BucketShareCheck,
+    CalibrationCheck,
+    Insights,
+    PartFacts,
+    SanityGateResult,
+)
 from should_cost.state.store import InMemoryJobStateStore
-from should_cost.workflow import engine
+from should_cost.workflow import graph
 from should_cost.workflow.signals import NeedsInputSignal
-
 from tests.factories import make_insights, make_pre_build_reasoning, make_proposed_parameters
 
 FAKE_FACTS = PartFacts(assembly_type=AssemblyType.SINGLE_COMPONENT, component_name="Test bracket")
@@ -29,7 +36,8 @@ FAKE_SANITY_GATE = SanityGateResult(
     impact_pct=10.0,
     impact_status=SanityStatus.GREEN,
     bucket_checks=[
-        BucketShareCheck(bucket=b, share_pct=20, target_low_pct=10, target_high_pct=70, status=SanityStatus.GREEN) for b in Bucket
+        BucketShareCheck(bucket=b, share_pct=20, target_low_pct=10, target_high_pct=70, status=SanityStatus.GREEN)
+        for b in Bucket
     ],
     calibration_checks=[CalibrationCheck(rule_id="C1", description="d", status=SanityStatus.GREEN, note="n")],
     historical_comparison_note="none",
@@ -57,30 +65,36 @@ FAKE_RECALC_RESULT = type(
 
 
 @pytest.fixture
-def settings():
+def settings(tmp_path):
     from should_cost.config import get_settings
 
+    # A fresh sqlite checkpoint file per test — LangGraph's own resumability state must
+    # not leak between tests (each uses a distinct Job().job_id/thread_id anyway, but a
+    # dedicated file keeps test runs trivially inspectable/disposable too).
+    os.environ["LANGGRAPH_CHECKPOINT_DB_PATH"] = str(tmp_path / "checkpoints.sqlite")
     get_settings.cache_clear()
     return get_settings()
 
 
 def _patch_downstream():
     return (
-        patch("should_cost.workflow.engine.model_client.build_chat_client", return_value=object()),
-        patch("should_cost.workflow.engine.model_client.extract_part_facts", new=AsyncMock(return_value=FAKE_FACTS)),
-        patch("should_cost.workflow.engine.model_client.pre_build_reasoning", new=AsyncMock(return_value=FAKE_PRE_BUILD)),
-        patch("should_cost.workflow.engine.model_client.propose_parameters", new=AsyncMock(return_value=FAKE_PROPOSED)),
-        patch("should_cost.workflow.engine.select_research_targets", return_value=[]),
+        patch("should_cost.workflow.graph.model_client.build_chat_client", return_value=object()),
+        patch("should_cost.workflow.graph.model_client.extract_part_facts", new=AsyncMock(return_value=FAKE_FACTS)),
         patch(
-            "should_cost.workflow.engine.build_calc_model_excel",
+            "should_cost.workflow.graph.model_client.pre_build_reasoning", new=AsyncMock(return_value=FAKE_PRE_BUILD)
+        ),
+        patch("should_cost.workflow.graph.model_client.propose_parameters", new=AsyncMock(return_value=FAKE_PROPOSED)),
+        patch("should_cost.workflow.graph.select_research_targets", return_value=[]),
+        patch(
+            "should_cost.workflow.graph.build_calc_model_excel",
             return_value=("/tmp/fake.xlsx", {n: n + 3 for n in range(1, 8)}, {}),
         ),
-        patch("should_cost.workflow.engine.recalc_and_check", return_value=FAKE_RECALC_RESULT),
-        patch("should_cost.workflow.engine.run_sanity_gate", return_value=FAKE_SANITY_GATE),
-        patch("should_cost.workflow.engine.compute_sensitivity", return_value=[]),
-        patch("should_cost.workflow.engine.build_slide_values_excel", return_value="/tmp/fake_slide.xlsx"),
-        patch("should_cost.workflow.engine.run_write_insights", new=AsyncMock(return_value=FAKE_INSIGHTS)),
-        patch("should_cost.workflow.engine.upload_unit_files", new=AsyncMock(return_value=[])),
+        patch("should_cost.workflow.graph.recalc_and_check", return_value=FAKE_RECALC_RESULT),
+        patch("should_cost.workflow.graph.run_sanity_gate", return_value=FAKE_SANITY_GATE),
+        patch("should_cost.workflow.graph.compute_sensitivity", return_value=[]),
+        patch("should_cost.workflow.graph.build_slide_values_excel", return_value="/tmp/fake_slide.xlsx"),
+        patch("should_cost.workflow.graph.run_write_insights", new=AsyncMock(return_value=FAKE_INSIGHTS)),
+        patch("should_cost.workflow.graph.upload_unit_files", new=AsyncMock(return_value=[])),
     )
 
 
@@ -102,10 +116,10 @@ async def test_needs_input_pauses_and_persists(settings) -> None:
     await store.save(job)
 
     with patch(
-        "should_cost.workflow.engine.run_discovery",
+        "should_cost.workflow.graph.run_discovery",
         new=AsyncMock(side_effect=NeedsInputSignal(NeedsInputReason.NO_SPEND_ROW, "no spend row found")),
     ):
-        await engine.run_job(job, store=store, settings=settings, credential=object())
+        await graph.run_job(job, store=store, settings=settings, credential=object())
 
     reloaded = await store.load(job.job_id)
     assert reloaded.status == JobStatus.NEEDS_INPUT
@@ -120,15 +134,15 @@ async def test_answer_resumes_and_completes(settings) -> None:
     await store.save(job)
 
     with patch(
-        "should_cost.workflow.engine.run_discovery",
+        "should_cost.workflow.graph.run_discovery",
         new=AsyncMock(side_effect=NeedsInputSignal(NeedsInputReason.NO_SPEND_ROW, "no spend row found")),
     ):
-        await engine.run_job(job, store=store, settings=settings, credential=object())
+        await graph.run_job(job, store=store, settings=settings, credential=object())
     job = await store.load(job.job_id)
     assert job.status == JobStatus.NEEDS_INPUT
 
     async def resume():
-        await engine.answer_job(job, "100000,8000,0.08", store=store, settings=settings, credential=object())
+        await graph.answer_job(job, "100000,8000,0.08", store=store, settings=settings, credential=object())
 
     await _run_with_patches(resume)
 
@@ -145,14 +159,15 @@ async def test_answer_resumes_and_completes(settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sanity_gate_red_pauses_instead_of_failing(settings) -> None:  # noqa: ARG001 - settings fixture ensures env vars are set
+async def test_sanity_gate_red_pauses_instead_of_failing(settings) -> None:
     store = InMemoryJobStateStore()
     job = Job(material_id="TEST001", requested_by="test")
-    job.spend_lookup = None
 
-    red_gate = FAKE_SANITY_GATE.model_copy(update={"overall_status": SanityStatus.RED, "action": "Do not produce slide output."})
+    red_gate = FAKE_SANITY_GATE.model_copy(
+        update={"overall_status": SanityStatus.RED, "action": "Do not produce slide output."}
+    )
 
-    from should_cost.models.common import SpendLookupResult, SupplierRow, SupplierType, MatchType
+    from should_cost.models.common import MatchType, SpendLookupResult, SupplierRow, SupplierType
 
     job.spend_lookup = SpendLookupResult(
         match_type=MatchType.EXACT,
@@ -174,16 +189,23 @@ async def test_sanity_gate_red_pauses_instead_of_failing(settings) -> None:  # n
     job.units = [JobUnit(label="Test Supplier", supplier=job.spend_lookup.suppliers[0])]
     await store.save(job)
 
-    with patch("should_cost.workflow.engine.model_client.build_chat_client", return_value=object()), \
-         patch("should_cost.workflow.engine.model_client.extract_part_facts", new=AsyncMock(return_value=FAKE_FACTS)), \
-         patch("should_cost.workflow.engine.model_client.pre_build_reasoning", new=AsyncMock(return_value=FAKE_PRE_BUILD)), \
-         patch("should_cost.workflow.engine.model_client.propose_parameters", new=AsyncMock(return_value=FAKE_PROPOSED)), \
-         patch("should_cost.workflow.engine.select_research_targets", return_value=[]), \
-         patch("should_cost.workflow.engine.build_calc_model_excel", return_value=("/tmp/fake.xlsx", {n: n + 3 for n in range(1, 8)}, {})), \
-         patch("should_cost.workflow.engine.recalc_and_check", return_value=FAKE_RECALC_RESULT), \
-         patch("should_cost.workflow.engine.run_sanity_gate", return_value=red_gate):
-        await engine.run_job(job, store=store, settings=settings, credential=object())
+    with (
+        patch("should_cost.workflow.graph.model_client.build_chat_client", return_value=object()),
+        patch("should_cost.workflow.graph.model_client.extract_part_facts", new=AsyncMock(return_value=FAKE_FACTS)),
+        patch(
+            "should_cost.workflow.graph.model_client.pre_build_reasoning", new=AsyncMock(return_value=FAKE_PRE_BUILD)
+        ),
+        patch("should_cost.workflow.graph.model_client.propose_parameters", new=AsyncMock(return_value=FAKE_PROPOSED)),
+        patch("should_cost.workflow.graph.select_research_targets", return_value=[]),
+        patch(
+            "should_cost.workflow.graph.build_calc_model_excel",
+            return_value=("/tmp/fake.xlsx", {n: n + 3 for n in range(1, 8)}, {}),
+        ),
+        patch("should_cost.workflow.graph.recalc_and_check", return_value=FAKE_RECALC_RESULT),
+        patch("should_cost.workflow.graph.run_sanity_gate", return_value=red_gate),
+    ):
+        await graph.run_job(job, store=store, settings=settings, credential=object())
 
     final = await store.load(job.job_id)
-    assert final.status == JobStatus.NEEDS_INPUT
+    assert final.status == JobStatus.NEEDS_INPUT, final.failure_reason
     assert final.pending_question.reason == NeedsInputReason.SANITY_GATE_RED

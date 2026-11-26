@@ -16,7 +16,7 @@ from azure.core.credentials_async import AsyncTokenCredential
 from should_cost.config import Settings
 from should_cost.models.job import JobStatus
 from should_cost.state.store import JobStateStore
-from should_cost.workflow.engine import NON_RESUMABLE_STEPS
+from should_cost.workflow.graph import NON_RESUMABLE_STEPS
 from should_cost.workflow.runner import start_job
 
 logger = structlog.get_logger(__name__)

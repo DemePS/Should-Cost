@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     state_storage_account_name: str
     job_retention_days: int = 90
 
+    # LangGraph's own checkpoint (backs interrupt/resume for should_cost/workflow/graph.py)
+    # — separate from the human/API-readable Job snapshot above, which state_backend
+    # still governs unchanged. A local sqlite file, not Azure Table/Blob — see
+    # graph.py's module docstring for why.
+    langgraph_checkpoint_db_path: str = "/tmp/should_cost_langgraph_checkpoints.sqlite"
+
     # ── Auth (v1 stub) ────────────────────────────────────────────────────
     auth_enabled: bool = False
 

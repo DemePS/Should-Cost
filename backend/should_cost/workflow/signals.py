@@ -1,5 +1,5 @@
-"""NeedsInputSignal lives in its own module (not in engine.py) so step modules
-(workflow/steps/*.py) can raise it without importing engine.py, which itself imports
+"""NeedsInputSignal lives in its own module (not in graph.py) so step modules
+(workflow/steps/*.py) can raise it without importing graph.py, which itself imports
 those step modules — avoiding a circular import.
 """
 

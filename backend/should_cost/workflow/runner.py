@@ -12,7 +12,7 @@ from azure.core.credentials_async import AsyncTokenCredential
 from should_cost.config import Settings
 from should_cost.models.job import Job
 from should_cost.state.store import JobStateStore
-from should_cost.workflow.engine import run_job
+from should_cost.workflow.graph import run_job
 
 _background_tasks: set[asyncio.Task] = set()
 
@@ -24,7 +24,7 @@ def start_job(job: Job, *, store: JobStateStore, settings: Settings, credential:
 
 
 def start_resume(job: Job, answer_text: str, *, store: JobStateStore, settings: Settings, credential: AsyncTokenCredential) -> None:
-    from should_cost.workflow.engine import answer_job
+    from should_cost.workflow.graph import answer_job
 
     task = asyncio.create_task(answer_job(job, answer_text, store=store, settings=settings, credential=credential))
     _background_tasks.add(task)

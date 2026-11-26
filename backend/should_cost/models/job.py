@@ -170,6 +170,12 @@ class Job(BaseModel):
     units: list[JobUnit] = Field(default_factory=list)
     trace: list[StepEvent] = Field(default_factory=list, description="Step 0 (pre-unit) trace")
 
+    # LangGraph orchestrator state only (should_cost/workflow/graph.py) — which unit the
+    # per-supplier step sequence (Pitfall P2) is currently on. Processed sequentially, not
+    # fanned out, so resuming a mid-unit interrupt is unambiguous (see graph.py's module
+    # docstring for why).
+    current_unit_index: int = 0
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

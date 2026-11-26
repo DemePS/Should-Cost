@@ -27,6 +27,24 @@ dependencies = [
   "agent-framework-foundry>=1.16,<2.0",
   "agent-framework-anthropic",
   "agent-framework-openai>=1.16,<2.0",
+  # Orchestration layer: one LangGraph node per should-cost step (0-7), replacing the
+  # hand-rolled async engine.py. Nodes call the existing model_client.py/research_agent.py
+  # Agent Framework chat clients directly — LangGraph doesn't require LangChain model
+  # objects inside a node, only a state schema, so the already-debugged Foundry/
+  # Anthropic/DeepSeek integration is untouched by this.
+  "langgraph>=1.2,<2.0",
+  # Durable checkpointer backend for the graph's own resume mechanics (interrupt/Command)
+  # — a real, maintained implementation rather than a bespoke BaseCheckpointSaver (its
+  # interface covers channel versioning, pending writes, pruning, etc.; getting that
+  # wrong risks silent state corruption, not just a crash). A local SQLite file survives
+  # restarts on a single App Service instance; see docs/design.md for why a bespoke
+  # Azure Table/Blob-backed one is a documented follow-up, not done here. This is
+  # separate from JobStateStore, which still persists a human/API-readable Job snapshot
+  # on every node (unchanged) — the sqlite file only backs LangGraph's own resumability.
+  # Pinned >=3.1.3: 2.0.10 (an older resolution of this same range) has a real bug
+  # against the aiosqlite version pulled in here (self.conn.is_alive() doesn't exist on
+  # its Connection) — confirmed live, not a guess.
+  "langgraph-checkpoint-sqlite>=3.1.3,<4.0",
   "tenacity>=9.0,<10.0",
   "structlog>=24.4,<25.0",
   "opencensus-ext-azure>=1.1,<2.0",
